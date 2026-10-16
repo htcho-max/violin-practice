@@ -8,6 +8,8 @@ import type { TabId } from '../components/TabBar';
 import { usePieces, updatePiece } from '../state/usePieces';
 import { currentPieces, pickReview, daysAgo } from '../data/pieces';
 import type { Piece } from '../data/db';
+import { useProgress, nextSuggestions, requestOpen, openStep, createBow, loadOpts } from './Exercises';
+import { STEPS } from '../exercise/curriculum';
 
 function PieceChips({ list, selected, onPick }: { list: Piece[]; selected?: string; onPick: (id: string | null) => void }) {
   if (!list.length) return null;
@@ -46,6 +48,23 @@ export function Today({ go, openSettings }: { go: (t: TabId) => void; openSettin
   const current = currentPieces(pieces);
   const review = pickReview(pieces, 2);
 
+  const progress = useProgress();
+  const sug = nextSuggestions(progress);
+  const passedSteps = STEPS.filter((x) => progress[x.id]?.passed).length;
+  const openEx = (fn: () => Promise<number>) => { requestOpen(fn); go('score'); };
+  const basicsCard = (
+    <div className="card" data-testid="basics-card">
+      <div className="card-head"><b>오늘의 기초 연습</b><span className="muted small">연습곡 {passedSteps}/{STEPS.length} 통과</span></div>
+      <button className="link rec-title" onClick={() => openEx(() => openStep(sug.step))} data-testid="today-step">
+        <b>음계·포지션 · {sug.step.title}</b>
+        <span className="muted small">{sug.step.tip}</span>
+      </button>
+      <button className="link rec-title" onClick={() => openEx(() => createBow(sug.bow.base, sug.bow.key, sug.bow.variant.id, loadOpts()))} data-testid="today-bow">
+        <b>활 연습 · {sug.bow.variant.id}. {sug.bow.variant.label}</b>
+        <span className="muted small">{sug.bow.baseLabel} · 통과하면 다음 변형을 추천해요</span>
+      </button>
+    </div>
+  );
   const piecesCard = (
     <div className="card">
       <div className="card-head"><b>오늘의 곡</b><button className="link small" onClick={() => go('log')}>곡 관리</button></div>
@@ -102,6 +121,7 @@ export function Today({ go, openSettings }: { go: (t: TabId) => void; openSettin
           </ol>
           <button className="primary wide big" onClick={() => start(settings.routine.filter((r) => r.minutes > 0))} data-testid="session-start">▶ 연습 시작</button>
         </div>
+        {basicsCard}
         {piecesCard}
       </section>
     );
@@ -132,6 +152,7 @@ export function Today({ go, openSettings }: { go: (t: TabId) => void; openSettin
         {cur.key === 'review' && <PieceChips list={review} selected={session.pieces?.[cur.key]} onPick={(id) => setPiece(cur.key, id)} />}
         {tool && <button className="secondary wide" onClick={() => go(tool.tab)}>{tool.label}</button>}
       </div>
+      {(cur.key === 'scale' || cur.key === 'shift') && basicsCard}
 
       <div className="card">
         <ol className="routine done-list">

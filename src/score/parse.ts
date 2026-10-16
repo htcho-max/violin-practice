@@ -8,19 +8,35 @@ export interface ParsedScore {
   measureLen: Map<number, number>;
   /** 박자표 [박 수, 음표] (첫 마디 기준) */
   time: [number, number];
+  /** 파트 이름들 (여러 파트 악보) */
+  parts: string[];
+}
+export interface ParseOptions {
+  /** 몇 번째 파트 (0부터) */
+  part?: number;
+  /** 반주용: 모든 성부·화음의 모든 음 */
+  allNotes?: boolean;
 }
 
 const STEP: Record<string, number> = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
 
-export function parseMusicXML(xml: string): ParsedScore {
+export function parseMusicXML(xml: string, opt: ParseOptions = {}): ParsedScore {
   const doc = new DOMParser().parseFromString(xml, 'application/xml');
   if (doc.getElementsByTagName('parsererror').length) throw new Error('MusicXML 파일을 읽을 수 없어요.');
   const root = doc.documentElement;
   if (root.nodeName !== 'score-partwise') throw new Error('score-partwise 형식의 MusicXML만 지원해요.');
   const text = (el: Element | null | undefined, tag: string) => el?.getElementsByTagName(tag)[0]?.textContent?.trim() ?? '';
   const title = text(root, 'work-title') || text(root, 'movement-title') || '악보';
-  const part = root.getElementsByTagName('part')[0];
+  const partEls = Array.from(root.getElementsByTagName('part'));
+  const names = new Map(Array.from(root.getElementsByTagName('score-part')).map((sp) => [sp.getAttribute('id'), text(sp, 'part-name')]));
+  const parts = partEls.map((p, i) => names.get(p.getAttribute('id')) || `파트 ${i + 1}`);
+  const part = partEls[Math.min(opt.part ?? 0, partEls.length - 1)];
   if (!part) throw new Error('파트가 없어요.');
+  const all = !!opt.allNotes;
+  // 붙임줄: 앞 음이 tie start 이고 이번 음이 tie stop 이면 앞 음을 늘림
+  let tieOpen = false;
+  let contAt: number | null = null; // 이어지는 음(화음 포함)의 시작 위치
+  const openTies = new Map<string, ScoreNote>(); // 반주용: "성부:midi" → 이어질 음
   let divisions = 1;
   const notes: ScoreNote[] = [];
   const measures: number[] = [];
@@ -50,12 +66,40 @@ export function parseMusicXML(xml: string): ParsedScore {
       const dur = Number(text(el, 'duration') || '0') / divisions;
       const start = isChord ? lastStart : pos;
       if (!isChord) { lastStart = pos; pos += dur; maxPos = Math.max(maxPos, pos); }
-      if (voice !== '1') continue;
+      if (voice !== '1' && !all) continue;
       if (el.getElementsByTagName('rest').length) continue;
       const p = el.getElementsByTagName('pitch')[0];
       if (!p) continue;
       const midi = 12 * (Number(text(p, 'octave')) + 1) + STEP[text(p, 'step')] + Number(text(p, 'alter') || '0');
+      const ties = Array.from(el.getElementsByTagName('tie')).map((t) => t.getAttribute('type'));
+      const tieStop = ties.includes('stop'), tieStart = ties.includes('start');
+      if (all) {
+        const key = `${voice}:${midi}`;
+        const prevT = openTies.get(key);
+        if (tieStop && prevT) { prevT.dur += dur; if (!tieStart) openTies.delete(key); continue; }
+        const nn: ScoreNote = { measure: num, index: 0, midi, beat: start, dur };
+        notes.push(nn);
+        if (tieStart) openTies.set(key, nn);
+        continue;
+      }
       const prev = notes[notes.length - 1];
+      // 붙임줄로 이어지는 음: 앞 음 길이에 더하고 따로 세지 않음
+      if (isChord && contAt === start) continue;
+      // 화음이면 모든 음이 붙임줄로 이어질 때만 (OSMD 그림과 같은 기준)
+      const groupStop = () => {
+        let ok = tieStop;
+        for (let sib = el.nextElementSibling; ok && sib && sib.nodeName === 'note' && sib.getElementsByTagName('chord').length; sib = sib.nextElementSibling) {
+          if (!Array.from(sib.getElementsByTagName('tie')).some((t) => t.getAttribute('type') === 'stop')) ok = false;
+        }
+        return ok;
+      };
+      if (!isChord && tieOpen && prev && groupStop()) {
+        prev.dur += dur;
+        contAt = start;
+        tieOpen = tieStart;
+        continue;
+      }
+      if (!isChord) { contAt = null; tieOpen = tieStart; } else if (tieStart) tieOpen = true;
       if (isChord && prev && prev.measure === num && prev.beat === start) {
         if (midi > prev.midi) prev.midi = midi; // 화음은 가장 높은 음으로 채점
         continue;
@@ -68,7 +112,8 @@ export function parseMusicXML(xml: string): ParsedScore {
   // 마디 안 순서 번호
   let cur = -1, k = 0;
   for (const n of notes) { if (n.measure !== cur) { cur = n.measure; k = 0; } n.index = k++; }
-  return { title, measures, notes, measureLen, time };
+  if (all) notes.sort((a, b) => a.measure - b.measure || a.beat - b.beat);
+  return { title, measures, notes, measureLen, time, parts };
 }
 
 export function notesInRange(s: ParsedScore, from: number, to: number): ScoreNote[] {

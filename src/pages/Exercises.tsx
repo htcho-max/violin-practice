@@ -55,6 +55,27 @@ export function createBow(base: BowBaseId, key: string, variant: string, o: Exer
   return createExercise('bow', { key, pattern: 'bow', positions: '1-3', base, variant: v.id }, o, 1, tempo, `${v.tip} ${b.tip}`, undefined, bowProgressId(base, key, v.id));
 }
 
+/** 다른 탭(오늘의 연습)에서 악보 탭을 열며 연습곡을 바로 열 때 */
+let pending: (() => Promise<number>) | null = null;
+export const requestOpen = (fn: () => Promise<number>) => { pending = fn; };
+export const takePending = () => { const p = pending; pending = null; return p; };
+
+export function bowPrefs(): { base: BowBaseId; key: string } {
+  try { return { base: (localStorage.getItem('violin-bow-base') as BowBaseId) || 'open', key: localStorage.getItem('violin-bow-key') || 'G' }; } catch { return { base: 'open', key: 'G' }; }
+}
+/** 다음에 할 단계 (아직 통과 못 한 첫 단계) 와 활 변형 */
+export function nextSuggestions(progress: Record<string, ExerciseProgress>) {
+  const step = STEPS.find((s) => !progress[s.id]?.passed) ?? STEPS[STEPS.length - 1];
+  const { base, key } = bowPrefs();
+  const variant = BOW_VARIANTS.find((v) => !progress[bowProgressId(base, key, v.id)]?.passed) ?? BOW_VARIANTS[0];
+  return { step, bow: { base, key, variant, baseLabel: BOW_BASES.find((b) => b.id === base)!.label } };
+}
+export async function openStep(step: Step, o = loadOpts()): Promise<number> {
+  const prev = await db.scores.filter((s) => s.exercise?.stepId === step.id).first();
+  const seed = (prev?.exercise?.seed ?? 0) + (prev ? 0 : 1);
+  return createExercise(step.id, step.spec, o, seed, step.tempo, step.tip);
+}
+
 export function Exercises({ onOpen, onBack }: { onOpen: (id: number) => void; onBack: () => void }) {
   const [opts, setOpts] = useState<ExerciseOptions>(loadOpts);
   const progress = useProgress();
@@ -75,9 +96,9 @@ export function Exercises({ onOpen, onBack }: { onOpen: (id: number) => void; on
   async function open(step: Step, newSeed = false) {
     setError(null); setBusy(true);
     try {
+      if (!newSeed) { onOpen(await openStep(step, opts)); return; }
       const prev = await db.scores.filter((s) => s.exercise?.stepId === step.id).first();
-      const seed = (prev?.exercise?.seed ?? 0) + (newSeed || !prev ? 1 : 0);
-      onOpen(await createExercise(step.id, step.spec, opts, seed, step.tempo, step.tip));
+      onOpen(await createExercise(step.id, step.spec, opts, (prev?.exercise?.seed ?? 0) + 1, step.tempo, step.tip));
     } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   }
   async function openCustom() {

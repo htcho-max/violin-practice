@@ -146,11 +146,23 @@ try {
     ok(/B4\+1[0-4]/.test(res), 'B4 +12센트를 가장 벗어난 음으로 표시');
     const colored = await page.locator('[data-testid=osmd] svg path[fill="#ca8a04"], [data-testid=osmd] svg path[fill="#15803d"], [data-testid=osmd] svg [fill="#ca8a04"], [data-testid=osmd] svg [fill="#15803d"]').count();
     ok(colored > 0, `음표 머리 색칠 (${colored})`);
+    ok(await seen(page.getByTestId('rhythm-stats')), `박자 채점 표시 (${(await page.getByTestId('rhythm-stats').textContent().catch(() => '')).trim()})`);
+    await page.getByTestId('view-rhythm').click();
+    await page.waitForTimeout(800);
+    ok(/늦게|일찍/.test(await page.getByTestId('rhythm-worst').textContent()), '박자로 보기: 일찍·늦게 음 목록');
+    await page.screenshot({ path: 'scripts/shot-rhythm.png', fullPage: true });
+    await page.getByTestId('view-pitch').click();
+    await page.waitForTimeout(500);
+    // 반주 붙이기 (같은 악보를 반주로)
+    await page.getByTestId('acc-file').setInputFiles(path.resolve('scripts/test-score.musicxml'));
+    await page.waitForTimeout(800);
+    ok(/반주 1파트/.test(await page.getByTestId('acc-card').textContent()), '반주 악보 붙이기');
+    ok(await seen(page.getByTestId('acc-mute')), '반주 옵션 (내 파트 소리 끄기)');
     await page.screenshot({ path: 'scripts/shot-score.png', fullPage: true });
     // 악보 듣기: 재생 중 현재 음 강조, 끝나면 버튼 복귀
     await page.getByTestId('play-bpm').fill('200');
     await page.getByTestId('play-toggle').click();
-    await page.waitForTimeout(1600);
+    await page.waitForTimeout(2200);
     const lit = await page.locator('[data-testid=osmd] .now-note').count();
     ok(lit > 0, `재생 중 현재 음 강조 (${lit})`);
     await page.screenshot({ path: 'scripts/shot-play.png', fullPage: true });
@@ -218,6 +230,15 @@ try {
     await page.getByRole('button', { name: '◀ 목록' }).click();
     await page.getByRole('button', { name: '◀ 목록' }).click();
     ok(/내 악보 0개/.test(await page.locator('.page').textContent()), '연습곡은 내 악보 목록과 따로');
+    // 오늘의 연습 → 기초 연습 추천 바로 열기
+    await tab(page, '오늘');
+    ok(await seen(page.getByTestId('basics-card')), '오늘의 기초 연습 카드');
+    const sugText = await page.getByTestId('today-step').textContent();
+    await page.getByTestId('today-step').click();
+    await page.getByTestId('exercise-card').waitFor({ timeout: 5000 });
+    ok(true, `추천 연습곡 바로 열기 (${sugText.slice(0, 30)})`);
+    await page.getByRole('button', { name: '◀ 목록' }).click();
+    await page.getByRole('button', { name: '◀ 목록' }).click();
     // 악보 폴더
     const chips = await page.getByTestId('folder-chips').textContent();
     ok(/스즈키 4권/.test(chips) && /스즈키 3권/.test(chips) && /기타 곡/.test(chips), `기본 폴더 3개 (${chips})`);

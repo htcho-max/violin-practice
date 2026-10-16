@@ -4,8 +4,9 @@ import type { OpenSheetMusicDisplay } from 'opensheetmusicdisplay';
 import { db, type ScoreFile } from '../data/db';
 import { parseMusicXML, notesInRange, type ParsedScore } from '../score/parse';
 import { alignNotes, summarizeScore, type Played, type Scored } from '../score/align';
-import { createOSMD, colorNotes, noteElements } from '../score/osmd';
-import { planPlayback, scorePlayer, slicePlan, type Voice } from '../score/player';
+import { createOSMD, colorNotes, noteElements, showParts } from '../score/osmd';
+import { planPlayback, scorePlayer, slicePlan, instFor, type Voice, type AccPart } from '../score/player';
+import { analyzeRhythm, rhythmTone } from '../score/rhythm';
 import { NoteSegmenter, equalRef } from '../audio/segment';
 import { pitchTracker } from '../audio/pitchTracker';
 import { midiName } from '../audio/notes';
@@ -14,7 +15,7 @@ import { usePieces } from '../state/usePieces';
 import { usePitch } from '../state/usePitch';
 import { useSettings } from '../state/settings';
 import { useWakeLock } from '../state/wakeLock';
-import { Exercises, createExercise, createBow, loadOpts, recordProgress } from './Exercises';
+import { Exercises, createExercise, createBow, loadOpts, recordProgress, takePending } from './Exercises';
 import { BOW_VARIANTS } from '../exercise/bow';
 import { STEPS } from '../exercise/curriculum';
 import { useFolders, guessFolder, folderForBook, addFolder, renameFolder, deleteFolder, moveFolder, moveScore } from '../data/folders';
@@ -46,6 +47,8 @@ export function Score() {
   useEffect(() => { try { localStorage.setItem('violin-score-folder', filter); } catch { /* 무시 */ } }, [filter]);
   const file = useRef<HTMLInputElement>(null);
   const open = scores.find((s) => s.id === openId) ?? null;
+  // 오늘의 연습에서 연습곡을 바로 열기
+  useEffect(() => { const p = takePending(); if (p) p().then((id) => { setExView(true); setOpenId(id); }).catch(() => {}); }, []);
   const folderName = (id?: string) => folders.find((f) => f.id === id)?.name ?? '분류 안 됨';
 
   async function importFile(f: File) {
@@ -168,7 +171,35 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
   const { settings } = useSettings();
   const pieces = usePieces();
   const piece = pieces.find((p) => p.id === score.pieceId);
-  const parsed: ParsedScore = useMemo(() => parseMusicXML(score.xml), [score.xml]);
+  const myPart = score.part ?? 0;
+  const parsed: ParsedScore = useMemo(() => parseMusicXML(score.xml, { part: myPart }), [score.xml, myPart]);
+  const accParts: AccPart[] = useMemo(() => {
+    const out: AccPart[] = [];
+    parsed.parts.forEach((name, i) => { if (i !== myPart) { try { out.push({ score: parseMusicXML(score.xml, { part: i, allNotes: true }), inst: instFor(name) }); } catch { /* 무시 */ } } });
+    if (score.accXml) {
+      try {
+        const head = parseMusicXML(score.accXml);
+        head.parts.forEach((name, i) => out.push({ score: parseMusicXML(score.accXml!, { part: i, allNotes: true }), inst: instFor(name) }));
+      } catch { /* 무시 */ }
+    }
+    return out;
+  }, [score.xml, score.accXml, parsed, myPart]);
+  const hasAcc = accParts.length > 0;
+  const [accOn, setAccOn] = useState(true);
+  const [mute, setMute] = useState(false);
+  const [scoreWithAcc, setScoreWithAcc] = useState(false);
+  const [view, setView] = useState<'pitch' | 'rhythm'>('pitch');
+  const accFile = useRef<HTMLInputElement>(null);
+  const [accError, setAccError] = useState<string | null>(null);
+  async function attachAcc(f: File) {
+    setAccError(null);
+    try {
+      const x = await f.text();
+      const p = parseMusicXML(x, { allNotes: true });
+      if (!p.notes.length) throw new Error('음표가 없는 악보예요.');
+      await db.scores.update(score.id!, { accXml: x, accName: f.name.replace(/\.(musicxml|xml)$/i, '') });
+    } catch (e) { setAccError((e as Error).message); } finally { if (accFile.current) accFile.current.value = ''; }
+  }
   const first = parsed.measures[0] ?? 1, last = parsed.measures[parsed.measures.length - 1] ?? 1;
   const firstNoteMeasure = parsed.notes[0]?.measure ?? first;
   const [from, setFrom] = useState(score.lastFrom ?? firstNoteMeasure);
@@ -205,6 +236,20 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
 
   const expected = useMemo(() => notesInRange(parsed, from, to), [parsed, from, to]);
 
+  const rhythm = useMemo(() => (result ? analyzeRhythm(parsed, result) : null), [result, parsed]);
+  const noteColors = useMemo(() => {
+    if (!result) return new Map<string, string>();
+    if (view === 'rhythm' && rhythm) {
+      const errs = new Map(rhythm.notes.map((n) => [n.key, n.err]));
+      return new Map(result.map((r) => {
+        const k = `${r.note.measure}:${r.note.index}`;
+        const e = errs.get(k);
+        return [k, e === undefined ? COLOR.missed : COLOR[rhythmTone(e)]];
+      }));
+    }
+    return new Map(result.map((r) => [`${r.note.measure}:${r.note.index}`, colorFor(r)]));
+  }, [result, view, rhythm]);
+
   // 악보 그리기
   useEffect(() => {
     let alive = true;
@@ -217,9 +262,10 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
         if (!alive || !osmd.current) return;
         setRendering(true);
         osmd.current.setOptions({ drawFromMeasureNumber: from, drawUpToMeasureNumber: to });
-        colorNotes(osmd.current, new Map(result ? result.map((r) => [`${r.note.measure}:${r.note.index}`, colorFor(r)]) : []));
+        if (parsed.parts.length > 1) showParts(osmd.current, myPart, !!score.showOthers);
+        colorNotes(osmd.current, noteColors, myPart);
         osmd.current.render();
-        els.current = noteElements(osmd.current);
+        els.current = noteElements(osmd.current, myPart);
         lit.current = [];
         setRenderError(null);
       } catch (e) {
@@ -229,7 +275,7 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
       }
     })();
     return () => { alive = false; };
-  }, [score.xml, from, to, result]);
+  }, [score.xml, from, to, noteColors, myPart, score.showOthers]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { db.scores.update(score.id!, { lastFrom: from, lastTo: to }); }, [score.id, from, to]);
 
@@ -259,9 +305,9 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
     lit.current[0]?.scrollIntoView?.({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
   }
   const curIdx = useRef(0);
-  async function playRange(resumeAt?: number) {
-    if (listening) stop();
-    const full = planPlayback(parsed, { bpm: playBpm, from, to, countIn: resumeAt === undefined && countIn });
+  async function playRange(resumeAt?: number, o: { keepListening?: boolean; muteMine?: boolean } = {}) {
+    if (listening && !o.keepListening) stop();
+    const full = planPlayback(parsed, { bpm: playBpm, from, to, countIn: o.keepListening ? true : resumeAt === undefined && countIn }, hasAcc && (accOn || o.keepListening) ? accParts : []);
     const plan = resumeAt === undefined ? full : slicePlan(full, resumeAt);
     const base = resumeAt ?? 0;
     setPlaying(true);
@@ -269,22 +315,28 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
       a4: settings.a4,
       click: withClick,
       voice,
+      mute: o.muteMine ?? (hasAcc && mute),
       onNote: (e) => {
         if (e) curIdx.current = base + plan.events.indexOf(e);
         highlight(e ? `${e.note.measure}:${e.note.index}` : null);
         setNowMeasure(e ? e.note.measure : null);
       },
-      onEnd: () => { if (loopRef.current) playRange(); else { highlight(null); setPlaying(false); } },
+      onEnd: () => {
+        if (o.keepListening) { highlight(null); setPlaying(false); setTimeout(() => stopRef.current(), 800); return; }
+        if (loopRef.current) playRange(); else { highlight(null); setPlaying(false); }
+      },
     });
     setVoiceNote(voice === 'sample' && !scorePlayer.usedSample ? '바이올린 소리를 불러오지 못해서 합성음으로 재생해요. (첫 재생은 인터넷 연결이 필요해요)' : '');
   }
   // 듣는 중에 템포를 바꾸면 지금 음부터 새 템포로 이어서
   const playingRef = useRef(false);
   playingRef.current = playing;
+  const listeningRef = useRef(false);
+  listeningRef.current = listening;
   const firstBpm = useRef(true);
   useEffect(() => {
     if (firstBpm.current) { firstBpm.current = false; return; }
-    if (!playingRef.current) return;
+    if (!playingRef.current || listeningRef.current) return;
     const id = setTimeout(() => { if (playingRef.current) playRange(curIdx.current); }, 200);
     return () => clearTimeout(id);
   }, [playBpm]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -296,8 +348,10 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
     played.current = [];
     if (!pitch.on) await pitch.start();
     setListening(true);
+    if (hasAcc && scoreWithAcc) { curIdx.current = 0; playRange(undefined, { keepListening: true, muteMine: true }); }
   }
   function stop() {
+    if (playingRef.current) stopPlay();
     setListening(false);
     // flush 는 effect 정리에서 → 다음 틱에 채점
     setTimeout(() => {
@@ -310,6 +364,8 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
       }
     }, 0);
   }
+  const stopRef = useRef(stop);
+  stopRef.current = stop;
   const setRange = (a: number, b: number) => {
     const A = Math.max(first, Math.min(last, a)), B = Math.max(A, Math.min(last, b));
     setFrom(A); setTo(B); setResult(null);
@@ -398,6 +454,12 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
           <button className={voice === 'sample' ? 'on' : ''} onClick={() => setVoice('sample')} disabled={playing}>바이올린 녹음</button>
           <button className={voice === 'synth' ? 'on' : ''} onClick={() => setVoice('synth')} disabled={playing}>합성음</button>
         </div>
+        {hasAcc && (
+          <div className="row-setting">
+            <label><input type="checkbox" checked={accOn} onChange={(e) => setAccOn(e.target.checked)} data-testid="acc-on" /> 반주 같이</label>
+            <label><input type="checkbox" checked={mute} onChange={(e) => setMute(e.target.checked)} data-testid="acc-mute" /> 내 파트 소리 끄기</label>
+          </div>
+        )}
         {voiceNote && <p className="hint">{voiceNote}</p>}
         <button className={`secondary wide ${playing ? 'on' : ''}`} onClick={playing ? stopPlay : () => { curIdx.current = 0; playRange(); }} disabled={!expected.length} data-testid="play-toggle">
           {playing ? '■ 듣기 멈추기' : `▶ ${from}~${to}마디 들어보기`}
@@ -415,8 +477,37 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
             <button className="primary wide big stop" onClick={stop} data-testid="score-stop">■ 끝내고 채점</button>
           </>
         )}
+        {hasAcc && !listening && (
+          <label className="small"><input type="checkbox" checked={scoreWithAcc} onChange={(e) => setScoreWithAcc(e.target.checked)} data-testid="score-with-acc" /> 반주를 틀고 같이 연주하며 채점 (이어폰을 쓰면 반주 소리가 섞이지 않아요)</label>
+        )}
         {pitch.error && <p className="error">{pitch.error}</p>}
-        <p className="hint">템포는 상관없어요. 악보 순서대로 연주하면 음을 맞춰 보고, 음표 색으로 보여줘요. 초록 ±10센트 안, 노랑 ±20, 빨강 그 이상, 보라 다른 음, 회색 놓친 음.</p>
+        <p className="hint">템포는 상관없어요. 악보 순서대로 연주하면 음을 맞춰 보고, 음표 색으로 보여줘요. 초록 ±10센트 안, 노랑 ±20, 빨강 그 이상, 보라 다른 음, 회색 놓친 음. 박자도 함께 봐요: 내 템포에 맞춰 각 음이 일찍·늦게 들어갔는지.</p>
+      </div>
+
+      <div className="card" data-testid="acc-card">
+        <b>파트 · 반주</b>
+        {parsed.parts.length > 1 && (
+          <>
+            <div className="row-setting">
+              <span>내 파트</span>
+              <select value={myPart} onChange={(e) => { db.scores.update(score.id!, { part: Number(e.target.value) }); setResult(null); }} aria-label="내 파트" data-testid="my-part">
+                {parsed.parts.map((n, i) => <option key={i} value={i}>{n}</option>)}
+              </select>
+            </div>
+            <label className="small"><input type="checkbox" checked={!!score.showOthers} onChange={(e) => db.scores.update(score.id!, { showOthers: e.target.checked })} /> 다른 파트도 악보에 보이기</label>
+          </>
+        )}
+        {score.accXml ? (
+          <div className="rec-head">
+            <span className="small">반주: <b>{score.accName || '반주 악보'}</b></span>
+            <button className="mini danger" onClick={() => db.scores.update(score.id!, { accXml: undefined, accName: undefined })} aria-label="반주 지우기">✕</button>
+          </div>
+        ) : (
+          <button className="secondary wide" onClick={() => accFile.current?.click()} data-testid="acc-attach">반주 악보 붙이기 (MusicXML)</button>
+        )}
+        <input ref={accFile} type="file" accept=".musicxml,.xml" hidden onChange={(e) => e.target.files?.[0] && attachAcc(e.target.files[0])} data-testid="acc-file" />
+        {accError && <p className="error">{accError}</p>}
+        <p className="hint">{hasAcc ? `반주 ${accParts.length}파트 · 피아노 파트는 피아노 소리, 그 밖은 바이올린 소리로 들려줘요.` : '바흐 더블의 2바이올린 파트나 피아노 반주를 붙이면 같이 들으며 연습할 수 있어요. 마디 번호가 같은 악보여야 해요.'}</p>
       </div>
 
       <div className="score-sheet">
@@ -432,6 +523,19 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
             <div><b>{sum.meanAbs === null ? '—' : `±${Math.round(sum.meanAbs)}`}</b><span>평균 오차(센트)</span></div>
             <div><b>{sum.wrong + sum.missed}</b><span>다른 음·놓침</span></div>
           </div>
+          {rhythm && (
+            <div className="stats" data-testid="rhythm-stats">
+              <div><b>♩≈{Math.round(rhythm.bpm)}</b><span>내 템포</span></div>
+              <div><b className={rhythmTone(rhythm.meanAbs)}>±{Math.round(rhythm.meanAbsMs)}ms</b><span>박자 오차 (박의 {Math.round(rhythm.meanAbs * 100)}%)</span></div>
+              <div><b>{rhythm.drift === null ? '—' : Math.abs(rhythm.drift) < 0.04 ? '고름' : rhythm.drift > 0 ? `${Math.round(rhythm.drift * 100)}% 빨라짐` : `${Math.round(-rhythm.drift * 100)}% 느려짐`}</b><span>뒤로 갈수록</span></div>
+            </div>
+          )}
+          {rhythm && (
+            <div className="segmented small">
+              <button className={view === 'pitch' ? 'on' : ''} onClick={() => setView('pitch')} data-testid="view-pitch">음정으로 보기</button>
+              <button className={view === 'rhythm' ? 'on' : ''} onClick={() => setView('rhythm')} data-testid="view-rhythm">박자로 보기</button>
+            </div>
+          )}
           {passMsg && <p className="good"><b>✓ {passMsg}</b></p>}
           {shiftRes.length > 0 && (
             <p className="small" data-testid="shift-stats">
@@ -439,15 +543,33 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
               {shiftMean !== null && shiftMean > 15 ? ' — 도착하는 손가락 음정을 드론과 함께 천천히 확인해 보세요.' : ''}
             </p>
           )}
-          <b>마디별</b>
+          <b>마디별 {view === 'rhythm' && rhythm ? '박자 (ms)' : '음정 (센트)'}</b>
           <div className="chips">
-            {[...sum.byMeasure.entries()].map(([m, v]) => (
+            {view === 'rhythm' && rhythm ? [...rhythm.byMeasure.entries()].map(([m, v]) => (
+              <button key={m} className={`chip measure-chip ${rhythmTone(v)}`} onClick={() => setRange(m, m)} title="이 마디만 다시">
+                {m}<small>±{Math.round((v * 60000) / rhythm.bpm)}</small>
+              </button>
+            )) : [...sum.byMeasure.entries()].map(([m, v]) => (
               <button key={m} className={`chip measure-chip ${tone(v)}`} onClick={() => setRange(m, m)} title="이 마디만 다시">
                 {m}<small>{v === null ? '—' : `±${Math.round(v)}`}</small>
               </button>
             ))}
           </div>
-          {worst.length > 0 && (
+          {view === 'rhythm' && rhythm && (
+            <>
+              <b>박자가 가장 벗어난 음</b>
+              <table className="tbl" data-testid="rhythm-worst">
+                <thead><tr><th>마디</th><th>음</th><th>박자</th></tr></thead>
+                <tbody>{[...rhythm.notes].sort((a, b) => Math.abs(b.err) - Math.abs(a.err)).slice(0, 6).map((n) => {
+                  const r = result!.find((x) => `${x.note.measure}:${x.note.index}` === n.key);
+                  const ms = Math.round((n.err * 60000) / rhythm.bpm);
+                  return <tr key={n.key}><td>{n.measure}</td><td>{r ? midiName(r.note.midi) : ''}</td><td className={rhythmTone(n.err)}>{ms > 0 ? `${ms}ms 늦게` : `${-ms}ms 일찍`}</td></tr>;
+                })}</tbody>
+              </table>
+              <p className="hint">템포가 조금씩 바뀌는 건 괜찮고, 주변 음들보다 혼자 당기거나 끄는 음을 찾아요. 초록 박의 6% 안, 노랑 12%, 빨강 그 이상.</p>
+            </>
+          )}
+          {view === 'pitch' && worst.length > 0 && (
             <>
               <b>가장 벗어난 음</b>
               <table className="tbl">
