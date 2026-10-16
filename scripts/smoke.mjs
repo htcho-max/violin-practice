@@ -147,6 +147,15 @@ try {
     const colored = await page.locator('[data-testid=osmd] svg path[fill="#ca8a04"], [data-testid=osmd] svg path[fill="#15803d"], [data-testid=osmd] svg [fill="#ca8a04"], [data-testid=osmd] svg [fill="#15803d"]').count();
     ok(colored > 0, `음표 머리 색칠 (${colored})`);
     await page.screenshot({ path: 'scripts/shot-score.png', fullPage: true });
+    // 악보 듣기: 재생 중 현재 음 강조, 끝나면 버튼 복귀
+    await page.getByTestId('play-bpm').fill('200');
+    await page.getByTestId('play-toggle').click();
+    await page.waitForTimeout(1600);
+    const lit = await page.locator('[data-testid=osmd] .now-note').count();
+    ok(lit > 0, `재생 중 현재 음 강조 (${lit})`);
+    await page.screenshot({ path: 'scripts/shot-play.png', fullPage: true });
+    await page.waitForTimeout(2500);
+    ok(/들어보기/.test(await page.getByTestId('play-toggle').textContent()), '재생 끝나면 버튼 복귀');
     ok(errors.length === 0, `콘솔 오류 없음 ${errors.join(' | ')}`);
     await browser.close();
   }

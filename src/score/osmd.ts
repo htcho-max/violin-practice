@@ -41,3 +41,30 @@ export function colorNotes(osmd: OpenSheetMusicDisplay, colors: Map<string, stri
     }
   }
 }
+
+/** "마디:순서" → 그려진 음표의 SVG id 들 (재생 중 현재 음 강조용) */
+export function noteElements(osmd: OpenSheetMusicDisplay): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  const list = osmd.GraphicSheet?.MeasureList ?? [];
+  for (const staves of list) {
+    const gm = staves?.[0];
+    if (!gm) continue;
+    const num = gm.parentSourceMeasure.MeasureNumberXML ?? gm.parentSourceMeasure.MeasureNumber;
+    let k = 0;
+    for (const se of gm.staffEntries) {
+      for (const gve of se.graphicalVoiceEntries) {
+        const ve = gve.parentVoiceEntry;
+        if (ve.IsGrace || ve.ParentVoice?.VoiceId !== 1) continue;
+        const gns = gve.notes.filter((n) => !n.sourceNote.isRest());
+        if (!gns.length) continue;
+        // 요소는 다시 그려질 수 있어서 id 만 저장 (vf-<id>)
+        const els = gns
+          .map((n) => (n as unknown as { getSVGId?: () => string }).getSVGId?.())
+          .filter((x): x is string => !!x);
+        out.set(`${num}:${k}`, els);
+        k++;
+      }
+    }
+  }
+  return out;
+}

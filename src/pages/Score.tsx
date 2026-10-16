@@ -4,7 +4,8 @@ import type { OpenSheetMusicDisplay } from 'opensheetmusicdisplay';
 import { db, type ScoreFile } from '../data/db';
 import { parseMusicXML, notesInRange, type ParsedScore } from '../score/parse';
 import { alignNotes, summarizeScore, type Played, type Scored } from '../score/align';
-import { createOSMD, colorNotes } from '../score/osmd';
+import { createOSMD, colorNotes, noteElements } from '../score/osmd';
+import { planPlayback, scorePlayer } from '../score/player';
 import { NoteSegmenter, equalRef } from '../audio/segment';
 import { pitchTracker } from '../audio/pitchTracker';
 import { midiName } from '../audio/notes';
@@ -96,6 +97,8 @@ export function Score() {
 
 function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }) {
   const { settings } = useSettings();
+  const pieces = usePieces();
+  const piece = pieces.find((p) => p.id === score.pieceId);
   const parsed: ParsedScore = useMemo(() => parseMusicXML(score.xml), [score.xml]);
   const first = parsed.measures[0] ?? 1, last = parsed.measures[parsed.measures.length - 1] ?? 1;
   const firstNoteMeasure = parsed.notes[0]?.measure ?? first;
@@ -110,7 +113,19 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
   const played = useRef<Played[]>([]);
   const [, tick] = useState(0);
   const [result, setResult] = useState<Scored[] | null>(null);
-  useWakeLock(listening, settings.wakeLock);
+  const els = useRef<Map<string, string[]>>(new Map());
+  const lit = useRef<SVGGElement[]>([]);
+  const [playing, setPlaying] = useState(false);
+  const [playBpm, setPlayBpm] = useState(72);
+  const [withClick, setWithClick] = useState(false);
+  const [countIn, setCountIn] = useState(true);
+  const [loop, setLoop] = useState(false);
+  const [nowMeasure, setNowMeasure] = useState<number | null>(null);
+  const loopRef = useRef(loop);
+  loopRef.current = loop;
+  useWakeLock(listening || playing, settings.wakeLock);
+  useEffect(() => { if (piece?.currentBpm) setPlayBpm(piece.currentBpm); else if (piece?.targetBpm) setPlayBpm(Math.round(piece.targetBpm * 0.7)); }, [piece?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => scorePlayer.stop(), []);
 
   const expected = useMemo(() => notesInRange(parsed, from, to), [parsed, from, to]);
 
@@ -128,6 +143,8 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
         osmd.current.setOptions({ drawFromMeasureNumber: from, drawUpToMeasureNumber: to });
         colorNotes(osmd.current, new Map(result ? result.map((r) => [`${r.note.measure}:${r.note.index}`, colorFor(r)]) : []));
         osmd.current.render();
+        els.current = noteElements(osmd.current);
+        lit.current = [];
         setRenderError(null);
       } catch (e) {
         setRenderError('악보를 그리지 못했어요: ' + ((e as Error).message ?? ''));
@@ -158,7 +175,27 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
   const live = useMemo(() => (listening ? alignNotes(expected, played.current) : null), [listening, expected, played.current.length]); // eslint-disable-line react-hooks/exhaustive-deps
   const liveDone = live ? live.filter((r) => r.status !== 'missed').length : 0;
 
+  function highlight(key: string | null) {
+    lit.current.forEach((g) => g.classList.remove('now-note'));
+    const ids = key ? els.current.get(key) ?? [] : [];
+    lit.current = ids.map((id) => document.getElementById(id) ?? document.getElementById(`vf-${id}`)).filter((x): x is HTMLElement & SVGGElement => !!x) as unknown as SVGGElement[];
+    lit.current.forEach((g) => g.classList.add('now-note'));
+  }
+  async function playRange() {
+    if (listening) stop();
+    const plan = planPlayback(parsed, { bpm: playBpm, from, to, countIn });
+    setPlaying(true);
+    await scorePlayer.play(plan, {
+      a4: settings.a4,
+      click: withClick,
+      onNote: (e) => { highlight(e ? `${e.note.measure}:${e.note.index}` : null); setNowMeasure(e ? e.note.measure : null); },
+      onEnd: () => { if (loopRef.current) playRange(); else setPlaying(false); },
+    });
+  }
+  function stopPlay() { scorePlayer.stop(); highlight(null); setNowMeasure(null); setPlaying(false); }
+
   async function start() {
+    if (playing) stopPlay();
     setResult(null);
     played.current = [];
     if (!pitch.on) await pitch.start();
@@ -203,6 +240,25 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
         {rendering && <p className="muted small">악보를 그리는 중…</p>}
         {renderError && <p className="error">{renderError}</p>}
         <div ref={holder} data-testid="osmd" />
+      </div>
+
+      <div className="card" data-testid="play-card">
+        <div className="card-head"><b>악보 듣기</b>{playing && nowMeasure !== null && <span className="muted small">{nowMeasure}마디</span>}</div>
+        <div className="row-setting">
+          <span>♩ =</span>
+          <button className="mini" onClick={() => setPlayBpm((b) => Math.max(30, b - 5))}>−5</button>
+          <input className="num" type="number" min={30} max={200} value={playBpm} onChange={(e) => setPlayBpm(Math.max(30, Math.min(200, Number(e.target.value) || 30)))} aria-label="재생 템포" data-testid="play-bpm" />
+          <button className="mini" onClick={() => setPlayBpm((b) => Math.min(200, b + 5))}>+5</button>
+        </div>
+        <div className="row-setting">
+          <label><input type="checkbox" checked={countIn} onChange={(e) => setCountIn(e.target.checked)} /> 시작 전 한 마디 세기</label>
+          <label><input type="checkbox" checked={withClick} onChange={(e) => setWithClick(e.target.checked)} /> 메트로놈</label>
+          <label><input type="checkbox" checked={loop} onChange={(e) => setLoop(e.target.checked)} /> 반복</label>
+        </div>
+        <button className={`secondary wide ${playing ? 'on' : ''}`} onClick={playing ? stopPlay : playRange} disabled={!expected.length} data-testid="play-toggle">
+          {playing ? '■ 듣기 멈추기' : `▶ ${from}~${to}마디 들어보기`}
+        </button>
+        <p className="hint">템포는 4분음표 기준이에요. 처음엔 느리게 들으며 음정과 리듬을 익히고, 반복을 켜 두고 같이 연주해 보세요.</p>
       </div>
 
       <div className="card">

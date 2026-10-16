@@ -65,3 +65,29 @@ describe('음표별 채점 (순서 맞추기)', () => {
     expect(summarizeScore(alignNotes(exp, [])).missed).toBe(9);
   });
 });
+
+import { planPlayback } from '../src/score/player';
+describe('악보 재생 계획', () => {
+  const s = parseMusicXML(XML);
+  it('마디 길이·박자', () => {
+    expect(s.time).toEqual([4, 4]);
+    expect(s.measureLen.get(1)).toBe(4);
+    expect(s.measureLen.get(2)).toBe(4);
+  });
+  it('♩=60, 카운트인 4박: 첫 음 4초, 2마디 첫 음 8초', () => {
+    const p = planPlayback(s, { bpm: 60, from: 1, to: 2, countIn: true });
+    expect(p.events[0].time).toBeCloseTo(4);
+    expect(p.events[4].time).toBeCloseTo(8);
+    expect(p.events[4].dur).toBeCloseTo(0.5);
+    expect(p.events[5].time).toBeCloseTo(9); // 쉼표 뒤
+    expect(p.total).toBeCloseTo(12);
+    expect(p.clicks.length).toBe(12);
+    expect(p.clicks.filter((c) => c.accent).length).toBe(3);
+  });
+  it('구간만, ♩=120', () => {
+    const p = planPlayback(s, { bpm: 120, from: 2, to: 2, countIn: false });
+    expect(p.events.length).toBe(5);
+    expect(p.events[0].time).toBe(0);
+    expect(p.total).toBeCloseTo(2);
+  });
+});
