@@ -50,12 +50,24 @@ export interface Recording {
 }
 export interface KV { key: string; value: unknown }
 
+/** 사용자가 직접 불러온 악보 (이 기기에만 저장, 앱·저장소에는 포함하지 않음) */
+export interface ScoreFile {
+  id?: number;
+  title: string;
+  xml: string;
+  pieceId?: string;
+  createdAt: number;
+  lastFrom?: number;
+  lastTo?: number;
+}
+
 class PracticeDB extends Dexie {
   sessions!: Table<Session, number>;
   pieces!: Table<Piece, string>;
   kv!: Table<KV, string>;
   ladders!: Table<Ladder, number>;
   recordings!: Table<Recording, number>;
+  scores!: Table<ScoreFile, number>;
   constructor() {
     super('violin-practice');
     this.version(1).stores({
@@ -67,6 +79,7 @@ class PracticeDB extends Dexie {
       ladders: '++id, date, pieceId',
       recordings: '++id, createdAt, pieceId',
     });
+    this.version(3).stores({ scores: '++id, createdAt, pieceId' });
   }
 }
 

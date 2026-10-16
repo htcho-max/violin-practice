@@ -4,3 +4,8 @@ scripts/*.wav
 scripts/*.png
 scripts/*.log
 *.tsbuildinfo
+tests/local/
+# 교재 악보는 저장소에 올리지 않음 (테스트용 자체 악보만 예외)
+*.musicxml
+*.mxl
+!scripts/test-score.musicxml

@@ -7,9 +7,10 @@ import { Tuner } from './pages/Tuner';
 import { Metronome } from './pages/Metronome';
 import { Drone } from './pages/Drone';
 import { Log } from './pages/Log';
+import { Score } from './pages/Score';
 import { useSettings } from './state/settings';
 
-const TITLES: Record<TabId, string> = { today: '오늘의 연습', tuner: '튜너', metronome: '메트로놈', drone: '음정 · 드론', log: '연습 기록' };
+const TITLES: Record<TabId, string> = { today: '오늘의 연습', tuner: '튜너', metronome: '메트로놈', drone: '음정 · 드론', score: '악보', log: '연습 기록' };
 
 export function App({ updatedFrom = null }: { updatedFrom?: string | null }) {
   const [toast, setToast] = useState<string | null>(updatedFrom ? `새 버전으로 업데이트됐어요 · ${__APP_VERSION__}` : null);
@@ -32,6 +33,7 @@ export function App({ updatedFrom = null }: { updatedFrom?: string | null }) {
             {tab === 'tuner' && <Tuner />}
             {tab === 'metronome' && <Metronome />}
             {tab === 'drone' && <Drone />}
+            {tab === 'score' && <Score />}
             {tab === 'log' && <Log />}
           </>
         )}

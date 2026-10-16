@@ -59,7 +59,7 @@ input[type=range], input[type=checkbox] { accent-color: var(--accent); }
 
 /* 탭바 */
 .tabbar { position: fixed; bottom: 0; left: 0; right: 0; display: flex; justify-content: center; background: var(--surface); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom); z-index: 10; }
-.tabbar .tab { flex: 1; max-width: 112px; border: none; background: none; border-radius: 0; display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 12px; color: var(--muted); padding: 8px 0; min-height: 60px; }
+.tabbar .tab { flex: 1; max-width: 96px; border: none; background: none; border-radius: 0; display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 12px; color: var(--muted); padding: 8px 0; min-height: 60px; }
 .tabbar .tab.active { color: var(--accent); font-weight: 700; }
 .tab-icon { font-size: 20px; line-height: 1; }
 
@@ -206,3 +206,9 @@ details.card[open] > summary { margin-bottom: 4px; }
 .rec-dot { width: 12px; height: 12px; border-radius: 50%; background: var(--bad); animation: blink 1s infinite; }
 @keyframes blink { 50% { opacity: .3; } }
 details.card > summary.card-summary > .muted { margin-right: auto; font-size: 14px; }
+.score-title { flex: 1; font-size: 16px; }
+.score-sheet { background: #fff; border-radius: 12px; border: 1px solid var(--line); padding: 4px; overflow-x: auto; min-height: 120px; }
+.score-sheet .muted, .score-sheet .error { padding: 8px; }
+.measure-chip { display: flex; flex-direction: column; align-items: center; min-width: 52px; padding: 4px 8px; line-height: 1.2; }
+.measure-chip small { font-size: 11px; }
+.measure-chip.good { border-color: var(--good); } .measure-chip.warn { border-color: var(--warn); } .measure-chip.bad { border-color: var(--bad); }

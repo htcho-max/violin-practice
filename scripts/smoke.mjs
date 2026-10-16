@@ -126,6 +126,31 @@ try {
     await browser.close();
   }
 
+  // ── 2b. 악보 불러오기 + 음표별 채점 (같은 phrases.wav: A4 B4+12 C#5-6 D5 | B4 D5) ──
+  {
+    const { browser, page, errors } = await launch('phrases.wav');
+    await tab(page, '악보');
+    await page.getByTestId('score-file').setInputFiles(path.resolve('scripts/test-score.musicxml'));
+    await page.waitForTimeout(1500);
+    const svgCount = await page.locator('[data-testid=osmd] svg').count();
+    ok(svgCount >= 1, `악보 그리기 (svg ${svgCount})`);
+    await page.getByTestId('to').fill('2');
+    await page.waitForTimeout(800);
+    await page.getByTestId('score-start').click();
+    await page.waitForTimeout(5200);
+    await page.getByTestId('score-stop').click();
+    await page.waitForTimeout(1200);
+    const res = await page.getByTestId('score-result').textContent();
+    const pct = Number(res.match(/(\d+)%/)?.[1]);
+    ok(pct >= 80, `채점 결과 맞은 음 ${pct}% (${res.match(/맞은 음 \d+\/\d+/)?.[0]})`);
+    ok(/B4\+1[0-4]/.test(res), 'B4 +12센트를 가장 벗어난 음으로 표시');
+    const colored = await page.locator('[data-testid=osmd] svg path[fill="#ca8a04"], [data-testid=osmd] svg path[fill="#15803d"], [data-testid=osmd] svg [fill="#ca8a04"], [data-testid=osmd] svg [fill="#15803d"]').count();
+    ok(colored > 0, `음표 머리 색칠 (${colored})`);
+    await page.screenshot({ path: 'scripts/shot-score.png', fullPage: true });
+    ok(errors.length === 0, `콘솔 오류 없음 ${errors.join(' | ')}`);
+    await browser.close();
+  }
+
   // ── 3. 비브라토 ──
   {
     const { browser, page, errors } = await launch('vibrato.wav');
