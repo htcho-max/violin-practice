@@ -14,6 +14,8 @@ import { usePieces } from '../state/usePieces';
 import { usePitch } from '../state/usePitch';
 import { useSettings } from '../state/settings';
 import { useWakeLock } from '../state/wakeLock';
+import { Exercises, createExercise, loadOpts, recordProgress } from './Exercises';
+import { STEPS } from '../exercise/curriculum';
 
 function useScores(): ScoreFile[] {
   const [rows, setRows] = useState<ScoreFile[]>([]);
@@ -33,6 +35,7 @@ export function Score() {
   const scores = useScores();
   const pieces = usePieces();
   const [openId, setOpenId] = useState<number | null>(null);
+  const [exView, setExView] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pieceForNew, setPieceForNew] = useState('');
   const file = useRef<HTMLInputElement>(null);
@@ -54,10 +57,17 @@ export function Score() {
     }
   }
 
-  if (open) return <ScoreView score={open} onClose={() => setOpenId(null)} />;
+  if (open) return <ScoreView key={`${open.id}:${open.createdAt}`} score={open} onClose={() => { setOpenId(null); setExView(!!open.exercise); }} />;
+  if (exView) return <Exercises onOpen={(id) => { setOpenId(id); }} onBack={() => setExView(false)} />;
+  const mine = scores.filter((s) => !s.exercise);
 
   return (
     <section className="page score">
+      <div className="card">
+        <b>음계 · 포지션 · 에튀드</b>
+        <p className="hint">1포지션 음계에서 3포지션, 포지션 이동, 에튀드까지 단계별 연습곡을 앱이 만들어 줘요.</p>
+        <button className="primary wide" onClick={() => setExView(true)} data-testid="open-exercises">연습곡 만들기</button>
+      </div>
       <div className="card">
         <b>악보 불러오기</b>
         <p className="hint">
@@ -75,10 +85,10 @@ export function Score() {
       </div>
 
       <div className="card">
-        <b>내 악보 {scores.length}개</b>
-        {scores.length === 0 && <p className="muted small">아직 없어요.</p>}
+        <b>내 악보 {mine.length}개</b>
+        {mine.length === 0 && <p className="muted small">아직 없어요.</p>}
         <ul className="rec-list">
-          {scores.map((s) => (
+          {mine.map((s) => (
             <li key={s.id}>
               <div className="rec-head">
                 <button className="link rec-title" onClick={() => setOpenId(s.id!)} data-testid="score-open">
@@ -103,7 +113,7 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
   const first = parsed.measures[0] ?? 1, last = parsed.measures[parsed.measures.length - 1] ?? 1;
   const firstNoteMeasure = parsed.notes[0]?.measure ?? first;
   const [from, setFrom] = useState(score.lastFrom ?? firstNoteMeasure);
-  const [to, setTo] = useState(score.lastTo ?? Math.min(last, (score.lastFrom ?? firstNoteMeasure) + 3));
+  const [to, setTo] = useState(score.lastTo ?? (score.exercise ? last : Math.min(last, (score.lastFrom ?? firstNoteMeasure) + 3)));
   const [rendering, setRendering] = useState(true);
   const [renderError, setRenderError] = useState<string | null>(null);
   const holder = useRef<HTMLDivElement>(null);
@@ -126,6 +136,11 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
   const loopRef = useRef(loop);
   loopRef.current = loop;
   useWakeLock(listening || playing, settings.wakeLock);
+  const ex = score.exercise;
+  const step = ex ? STEPS.find((s) => s.id === ex.stepId) : undefined;
+  const [passMsg, setPassMsg] = useState<string | null>(null);
+  const [regenBusy, setRegenBusy] = useState(false);
+  useEffect(() => { if (ex) setPlayBpm(ex.tempo); }, [ex?.stepId]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (piece?.currentBpm) setPlayBpm(piece.currentBpm); else if (piece?.targetBpm) setPlayBpm(Math.round(piece.targetBpm * 0.7)); }, [piece?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => scorePlayer.stop(), []);
 
@@ -226,13 +241,36 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
   function stop() {
     setListening(false);
     // flush 는 effect 정리에서 → 다음 틱에 채점
-    setTimeout(() => setResult(alignNotes(expected, played.current)), 0);
+    setTimeout(() => {
+      const r = alignNotes(expected, played.current);
+      setResult(r);
+      if (ex && from <= firstNoteMeasure && to >= last && r.length) {
+        const sm = summarizeScore(r);
+        const pct = Math.round((sm.ok / Math.max(1, sm.total)) * 100);
+        recordProgress(ex.stepId, pct, sm.meanAbs, playBpm).then((ok) => setPassMsg(ok ? '통과! 다음 단계로 가거나 템포를 올려 보세요.' : null));
+      }
+    }, 0);
   }
   const setRange = (a: number, b: number) => {
     const A = Math.max(first, Math.min(last, a)), B = Math.max(A, Math.min(last, b));
     setFrom(A); setTo(B); setResult(null);
   };
   const span = to - from + 1;
+  const shiftSet = useMemo(() => new Set(ex?.shiftKeys ?? []), [ex]);
+  const shiftRes = result && ex ? result.filter((r) => shiftSet.has(`${r.note.measure}:${r.note.index}`)) : [];
+  const shiftOk = shiftRes.filter((r) => r.status === 'ok');
+  const shiftMean = shiftOk.length ? shiftOk.reduce((a, r) => a + Math.abs(r.cents!), 0) / shiftOk.length : null;
+  async function regenerate() {
+    if (!ex) return;
+    setRegenBusy(true);
+    try { await createExercise(ex.stepId, ex.spec, loadOpts(), ex.seed + 1, ex.tempo, ex.tip); }
+    finally { setRegenBusy(false); }
+  }
+  async function rebuild() {
+    if (!ex) return;
+    setRegenBusy(true);
+    try { await createExercise(ex.stepId, ex.spec, loadOpts(), ex.seed, ex.tempo, ex.tip); } finally { setRegenBusy(false); }
+  }
   const sum = result ? summarizeScore(result) : null;
   const worst = result ? result.filter((r) => r.status === 'ok').sort((a, b) => Math.abs(b.cents!) - Math.abs(a.cents!)).slice(0, 6) : [];
 
@@ -242,6 +280,17 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
         <button className="mini" onClick={() => { if (listening) stop(); pitch.stop(); onClose(); }}>◀ 목록</button>
         <b className="score-title">{score.title}</b>
       </div>
+
+      {ex && (
+        <div className="card" data-testid="exercise-card">
+          {(step?.tip ?? ex.tip) && <p className="hint"><b>팁</b> {step?.tip ?? ex.tip}</p>}
+          {ex.shiftKeys.length > 0 && <p className="hint">포지션을 옮기는 음 {ex.shiftKeys.length}개는 채점 뒤에 따로 보여줘요.</p>}
+          <div className="session-controls">
+            <button onClick={rebuild} disabled={regenBusy || playing || listening} title="연습곡 화면에서 바꾼 리듬·활·운지 설정으로 다시 만들기">설정 다시 적용</button>
+            {ex.spec.pattern === 'etude' && <button onClick={regenerate} disabled={regenBusy || playing || listening} data-testid="ex-regen">다른 곡 만들기</button>}
+          </div>
+        </div>
+      )}
 
       <div className="card">
         <div className="row-setting">
@@ -309,6 +358,13 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
             <div><b>{sum.meanAbs === null ? '—' : `±${Math.round(sum.meanAbs)}`}</b><span>평균 오차(센트)</span></div>
             <div><b>{sum.wrong + sum.missed}</b><span>다른 음·놓침</span></div>
           </div>
+          {passMsg && <p className="good"><b>✓ {passMsg}</b></p>}
+          {shiftRes.length > 0 && (
+            <p className="small" data-testid="shift-stats">
+              포지션 이동 음 {shiftOk.length}/{shiftRes.length}개 맞음{shiftMean !== null && <> · 평균 <b className={tone(shiftMean)}>±{Math.round(shiftMean)}센트</b></>}
+              {shiftMean !== null && shiftMean > 15 ? ' — 도착하는 손가락 음정을 드론과 함께 천천히 확인해 보세요.' : ''}
+            </p>
+          )}
           <b>마디별</b>
           <div className="chips">
             {[...sum.byMeasure.entries()].map(([m, v]) => (

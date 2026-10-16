@@ -59,7 +59,11 @@ export interface ScoreFile {
   createdAt: number;
   lastFrom?: number;
   lastTo?: number;
+  /** 앱이 만든 연습곡 (음계·포지션·에튀드) */
+  exercise?: ExerciseMeta;
 }
+export interface ExerciseMeta { stepId: string; spec: import('../exercise/curriculum').ExerciseSpec; seed: number; shiftKeys: string[]; tip?: string; tempo: number }
+export interface ExerciseProgress { best: number; mean: number | null; passed: boolean; at: number; bpm?: number; tries: number }
 
 class PracticeDB extends Dexie {
   sessions!: Table<Session, number>;

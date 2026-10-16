@@ -172,6 +172,44 @@ try {
     await browser.close();
   }
 
+  // ── 2c. 연습곡 생성 (음계·포지션·에튀드) ──
+  {
+    const { browser, page, errors } = await launch('phrases.wav');
+    await tab(page, '악보');
+    await page.getByTestId('open-exercises').click();
+    await page.getByRole('button', { name: '16분음표' }).click();
+    await page.getByTestId('ex-C4').click();
+    await page.getByTestId('exercise-card').waitFor({ timeout: 5000 });
+    await page.waitForTimeout(1500);
+    ok((await page.locator('[data-testid=osmd] svg').count()) >= 1, '연습곡 악보 그리기');
+    const svgText = await page.locator('[data-testid=osmd] svg').first().textContent();
+    ok(/3포지션/.test(svgText) && /1포지션/.test(svgText), '포지션 표시 (1·3포지션)');
+    ok(/D장조 음계 2옥타브/.test(await page.locator('.score-title').textContent()), '연습곡 제목');
+    ok(Number(await page.getByTestId('play-bpm').inputValue()) === 60, '단계 템포 ♩=60');
+    await page.screenshot({ path: 'scripts/shot-exercise.png', fullPage: true });
+    await page.getByTestId('play-bpm').fill('200');
+    await page.getByTestId('play-toggle').click();
+    await page.waitForTimeout(2200);
+    ok((await page.locator('[data-testid=osmd] .now-note').count()) > 0, '연습곡 재생 중 현재 음 강조');
+    await page.getByTestId('play-toggle').click();
+    await page.getByRole('button', { name: '◀ 목록' }).click();
+    ok(await seen(page.getByTestId('ex-D1')), '목록으로 돌아오면 연습곡 화면');
+    await page.getByTestId('ex-D1').click();
+    await page.getByTestId('ex-regen').waitFor({ timeout: 5000 });
+    await page.waitForTimeout(1200);
+    const h1 = await page.locator('[data-testid=osmd] svg').first().innerHTML();
+    await page.getByTestId('ex-regen').click();
+    await page.waitForTimeout(2500);
+    const h2 = await page.locator('[data-testid=osmd] svg').first().innerHTML();
+    ok(h1 !== h2 && /#2/.test(await page.locator('.score-title').textContent()), '다른 에튀드 만들기');
+    await page.screenshot({ path: 'scripts/shot-etude.png', fullPage: true });
+    await page.getByRole('button', { name: '◀ 목록' }).click();
+    await page.getByRole('button', { name: '◀ 목록' }).click();
+    ok(/내 악보 0개/.test(await page.locator('.page').textContent()), '연습곡은 내 악보 목록과 따로');
+    ok(errors.length === 0, `콘솔 오류 없음 ${errors.join(' | ')}`);
+    await browser.close();
+  }
+
   // ── 3. 비브라토 ──
   {
     const { browser, page, errors } = await launch('vibrato.wav');
