@@ -212,4 +212,4 @@ details.card > summary.card-summary > .muted { margin-right: auto; font-size: 14
 .measure-chip { display: flex; flex-direction: column; align-items: center; min-width: 52px; padding: 4px 8px; line-height: 1.2; }
 .measure-chip small { font-size: 11px; }
 .measure-chip.good { border-color: var(--good); } .measure-chip.warn { border-color: var(--warn); } .measure-chip.bad { border-color: var(--bad); }
-.score-sheet .now-note path, .score-sheet .now-note ellipse { fill: #2563eb !important; stroke: #2563eb !important; }
+.score-sheet .now-note path, .score-sheet .now-note ellipse { fill: #e11d48 !important; stroke: #e11d48 !important; }

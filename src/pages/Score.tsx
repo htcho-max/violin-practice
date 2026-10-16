@@ -5,7 +5,7 @@ import { db, type ScoreFile } from '../data/db';
 import { parseMusicXML, notesInRange, type ParsedScore } from '../score/parse';
 import { alignNotes, summarizeScore, type Played, type Scored } from '../score/align';
 import { createOSMD, colorNotes, noteElements } from '../score/osmd';
-import { planPlayback, scorePlayer, type Voice } from '../score/player';
+import { planPlayback, scorePlayer, slicePlan, type Voice } from '../score/player';
 import { NoteSegmenter, equalRef } from '../audio/segment';
 import { pitchTracker } from '../audio/pitchTracker';
 import { midiName } from '../audio/notes';
@@ -182,20 +182,38 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
     const ids = key ? els.current.get(key) ?? [] : [];
     lit.current = ids.map((id) => document.getElementById(id) ?? document.getElementById(`vf-${id}`)).filter((x): x is HTMLElement & SVGGElement => !!x) as unknown as SVGGElement[];
     lit.current.forEach((g) => g.classList.add('now-note'));
+    lit.current[0]?.scrollIntoView?.({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
   }
-  async function playRange() {
+  const curIdx = useRef(0);
+  async function playRange(resumeAt?: number) {
     if (listening) stop();
-    const plan = planPlayback(parsed, { bpm: playBpm, from, to, countIn });
+    const full = planPlayback(parsed, { bpm: playBpm, from, to, countIn: resumeAt === undefined && countIn });
+    const plan = resumeAt === undefined ? full : slicePlan(full, resumeAt);
+    const base = resumeAt ?? 0;
     setPlaying(true);
     await scorePlayer.play(plan, {
       a4: settings.a4,
       click: withClick,
       voice,
-      onNote: (e) => { highlight(e ? `${e.note.measure}:${e.note.index}` : null); setNowMeasure(e ? e.note.measure : null); },
-      onEnd: () => { if (loopRef.current) playRange(); else setPlaying(false); },
+      onNote: (e) => {
+        if (e) curIdx.current = base + plan.events.indexOf(e);
+        highlight(e ? `${e.note.measure}:${e.note.index}` : null);
+        setNowMeasure(e ? e.note.measure : null);
+      },
+      onEnd: () => { if (loopRef.current) playRange(); else { highlight(null); setPlaying(false); } },
     });
     setVoiceNote(voice === 'sample' && !scorePlayer.usedSample ? '바이올린 소리를 불러오지 못해서 합성음으로 재생해요. (첫 재생은 인터넷 연결이 필요해요)' : '');
   }
+  // 듣는 중에 템포를 바꾸면 지금 음부터 새 템포로 이어서
+  const playingRef = useRef(false);
+  playingRef.current = playing;
+  const firstBpm = useRef(true);
+  useEffect(() => {
+    if (firstBpm.current) { firstBpm.current = false; return; }
+    if (!playingRef.current) return;
+    const id = setTimeout(() => { if (playingRef.current) playRange(curIdx.current); }, 200);
+    return () => clearTimeout(id);
+  }, [playBpm]); // eslint-disable-line react-hooks/exhaustive-deps
   function stopPlay() { scorePlayer.stop(); highlight(null); setNowMeasure(null); setPlaying(false); }
 
   async function start() {
@@ -240,12 +258,6 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
         </div>
       </div>
 
-      <div className="score-sheet">
-        {rendering && <p className="muted small">악보를 그리는 중…</p>}
-        {renderError && <p className="error">{renderError}</p>}
-        <div ref={holder} data-testid="osmd" />
-      </div>
-
       <div className="card" data-testid="play-card">
         <div className="card-head"><b>악보 듣기</b>{playing && nowMeasure !== null && <span className="muted small">{nowMeasure}마디</span>}</div>
         <div className="row-setting">
@@ -264,7 +276,7 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
           <button className={voice === 'synth' ? 'on' : ''} onClick={() => setVoice('synth')} disabled={playing}>합성음</button>
         </div>
         {voiceNote && <p className="hint">{voiceNote}</p>}
-        <button className={`secondary wide ${playing ? 'on' : ''}`} onClick={playing ? stopPlay : playRange} disabled={!expected.length} data-testid="play-toggle">
+        <button className={`secondary wide ${playing ? 'on' : ''}`} onClick={playing ? stopPlay : () => { curIdx.current = 0; playRange(); }} disabled={!expected.length} data-testid="play-toggle">
           {playing ? '■ 듣기 멈추기' : `▶ ${from}~${to}마디 들어보기`}
         </button>
         <p className="hint">템포는 4분음표 기준이에요. 처음엔 느리게 들으며 음정과 리듬을 익히고, 반복을 켜 두고 같이 연주해 보세요.</p>
@@ -282,6 +294,12 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
         )}
         {pitch.error && <p className="error">{pitch.error}</p>}
         <p className="hint">템포는 상관없어요. 악보 순서대로 연주하면 음을 맞춰 보고, 음표 색으로 보여줘요. 초록 ±10센트 안, 노랑 ±20, 빨강 그 이상, 보라 다른 음, 회색 놓친 음.</p>
+      </div>
+
+      <div className="score-sheet">
+        {rendering && <p className="muted small">악보를 그리는 중…</p>}
+        {renderError && <p className="error">{renderError}</p>}
+        <div ref={holder} data-testid="osmd" />
       </div>
 
       {sum && (
@@ -314,6 +332,7 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
           <p className="hint">마디 번호를 누르면 그 마디만 골라서 반복할 수 있어요.</p>
         </div>
       )}
+
     </section>
   );
 }

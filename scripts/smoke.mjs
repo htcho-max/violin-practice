@@ -156,6 +156,18 @@ try {
     await page.screenshot({ path: 'scripts/shot-play.png', fullPage: true });
     await page.waitForTimeout(2500);
     ok(/들어보기/.test(await page.getByTestId('play-toggle').textContent()), '재생 끝나면 버튼 복귀');
+    // 재생 중 템포 변경: 끊기지 않고 이어서 재생
+    await page.getByTestId('play-bpm').fill('40');
+    await page.getByTestId('play-toggle').click();
+    await page.waitForTimeout(7500); // 카운트인 4박(6초) + 첫 음
+    const before = await page.evaluate(() => document.querySelector('.now-note')?.id);
+    await page.getByTestId('play-bpm').fill('200');
+    await page.waitForTimeout(1500);
+    const after = await page.evaluate(() => document.querySelector('.now-note')?.id);
+    ok(!!before && !!after && before !== after, `재생 중 템포 변경 후 계속 진행 (${before} → ${after})`);
+    const order = await page.evaluate(() => { const a = document.querySelector('[data-testid=play-card]'), b = document.querySelector('.score-sheet'); return !!(a && b && (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING)); });
+    ok(order, '메뉴가 악보 위에 있음');
+    await page.screenshot({ path: 'scripts/shot-layout.png', fullPage: true });
     ok(errors.length === 0, `콘솔 오류 없음 ${errors.join(' | ')}`);
     await browser.close();
   }

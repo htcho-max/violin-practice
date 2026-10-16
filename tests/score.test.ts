@@ -91,3 +91,17 @@ describe('악보 재생 계획', () => {
     expect(p.total).toBeCloseTo(2);
   });
 });
+
+import { slicePlan } from '../src/score/player';
+describe('재생 중 템포 변경', () => {
+  it('i 번째 음부터 0초 시작', () => {
+    const s = parseMusicXML(XML);
+    const p = planPlayback(s, { bpm: 60, from: 1, to: 2, countIn: false });
+    const q = slicePlan(p, 4);
+    expect(q.events.length).toBe(p.events.length - 4);
+    expect(q.events[0].time).toBe(0);
+    expect(q.events[1].time).toBeCloseTo(1);
+    expect(q.total).toBeCloseTo(4);
+    expect(q.clicks[0].time).toBeCloseTo(0);
+  });
+});

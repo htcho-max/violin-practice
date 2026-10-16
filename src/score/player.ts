@@ -123,3 +123,13 @@ export class ScorePlayer {
 }
 
 export const scorePlayer = new ScorePlayer();
+
+/** 재생 계획을 i 번째 음부터 잘라서 0초부터 시작하게 (재생 중 템포 바꿀 때) */
+export function slicePlan(plan: ReturnType<typeof planPlayback>, i: number): ReturnType<typeof planPlayback> {
+  const start = plan.events[i]?.time ?? 0;
+  return {
+    events: plan.events.slice(i).map((e) => ({ ...e, time: e.time - start })),
+    clicks: plan.clicks.filter((c) => c.time >= start - 1e-6).map((c) => ({ ...c, time: c.time - start })),
+    total: plan.total - start,
+  };
+}
