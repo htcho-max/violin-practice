@@ -4,7 +4,11 @@ import { analyzeFrame } from './analyze';
 import { MedianWindow } from './smoothing';
 import { clickNear } from './clicks';
 
-export interface PitchReading { freq: number | null; db: number; clarity: number; time: number }
+/** freq: 화면 표시용(중앙값으로 부드럽게). raw: 짧은 창(2048)으로 잰 그대로의 값 (비브라토·녹음 분석용) */
+export interface PitchReading { freq: number | null; raw: number | null; db: number; clarity: number; time: number }
+
+/** raw 분석 창 길이(초)는 sampleRate 에 따라 다름 */
+export const RAW_BUFFER = 2048;
 
 const BUFFER = 4096;
 
@@ -14,6 +18,7 @@ class PitchTracker {
   private source: MediaStreamAudioSourceNode | null = null;
   private analyser: AnalyserNode | null = null;
   private detector = PitchDetector.forFloat32Array(BUFFER);
+  private rawDetector = PitchDetector.forFloat32Array(RAW_BUFFER);
   private buf = new Float32Array(BUFFER);
   private median = new MedianWindow(5);
   private raf = 0;
@@ -23,6 +28,9 @@ class PitchTracker {
   minDb = -50;
 
   get running() { return this.stream !== null; }
+  /** 녹음용으로 같은 마이크 스트림을 씀 */
+  get mediaStream() { return this.stream; }
+  get sampleRate() { return this.analyser?.context.sampleRate ?? 48000; }
 
   async start(): Promise<void> {
     if (this.stream) return;
@@ -64,10 +72,11 @@ class PitchTracker {
     const now = ctx.currentTime;
     // 메트로놈 클릭이 분석 창 안에 있으면 직전 값을 유지
     if (clickNear(now, BUFFER / ctx.sampleRate)) {
-      this.emit({ freq: this.lastFreq, db: -Infinity, clarity: 0, time: now });
+      this.emit({ freq: this.lastFreq, raw: null, db: -Infinity, clarity: 0, time: performance.now() / 1000 });
       return;
     }
     const r = analyzeFrame(this.detector, this.buf, ctx.sampleRate, this.minDb);
+    const raw = r.freq === null ? null : analyzeFrame(this.rawDetector, this.buf.subarray(BUFFER - RAW_BUFFER), ctx.sampleRate, this.minDb).freq;
     let freq: number | null = null;
     if (r.freq !== null) {
       // 반음 이상 튀면 새 음으로 보고 창을 비움
@@ -80,7 +89,7 @@ class PitchTracker {
       freq = this.lastFreq; // 잠깐의 끊김은 유지
     }
     this.lastFreq = freq;
-    this.emit({ freq, db: r.db, clarity: r.clarity, time: now });
+    this.emit({ freq, raw, db: r.db, clarity: r.clarity, time: performance.now() / 1000 });
   };
 
   private emit(r: PitchReading) {

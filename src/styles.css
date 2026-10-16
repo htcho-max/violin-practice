@@ -161,3 +161,48 @@ textarea { width: 100%; border-radius: 12px; border: 1px solid var(--line); back
 .sheet { background: var(--bg); width: 100%; max-width: 560px; max-height: 88dvh; overflow-y: auto; border-radius: 20px 20px 0 0; padding: 16px 16px calc(16px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 12px; }
 
 .toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(76px + env(safe-area-inset-bottom)); background: var(--text); color: var(--bg); padding: 10px 16px; border-radius: 12px; font-size: 14px; z-index: 30; max-width: calc(100% - 32px); box-shadow: 0 4px 12px rgba(0,0,0,.25); }
+
+/* 2·3단계 */
+.page-sub { display: flex; flex-direction: column; gap: 12px; }
+details.card > summary.card-summary { cursor: pointer; list-style: none; display: flex; justify-content: space-between; align-items: center; gap: 8px; min-height: 28px; }
+details.card > summary.card-summary::-webkit-details-marker { display: none; }
+details.card > summary.card-summary::after { content: '▾'; color: var(--muted); }
+details.card[open] > summary.card-summary::after { content: '▴'; }
+details.card[open] > summary { margin-bottom: 4px; }
+.trace { width: 100%; display: block; background: var(--surface-2); border-radius: 10px; }
+.tbl { width: 100%; border-collapse: collapse; font-size: 14px; font-variant-numeric: tabular-nums; }
+.tbl th { text-align: left; font-weight: 600; color: var(--muted); font-size: 12px; padding: 4px 6px; border-bottom: 1px solid var(--line); }
+.tbl td { padding: 6px; border-bottom: 1px solid var(--line); }
+.tbl tr:last-child td { border-bottom: none; }
+.good { color: var(--good); } .warn { color: var(--warn); } .bad { color: var(--bad); }
+.badge { font-size: 11px; background: var(--warn-zone); color: var(--text); border: 1px solid var(--warn); border-radius: 99px; padding: 1px 8px; white-space: nowrap; }
+.advice { margin: 0; padding-left: 18px; font-size: 14px; line-height: 1.5; }
+.num-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.num-field { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--muted); }
+.num-field .num { width: 76px; padding: 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font-size: 16px; }
+.trainer-live { display: flex; flex-direction: column; gap: 8px; }
+.piece-list { list-style: none; margin: 0; padding: 0; }
+.piece { border-bottom: 1px solid var(--line); }
+.piece:last-child { border-bottom: none; }
+.piece-head.link { width: 100%; display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; padding: 12px 0; }
+.piece-head .small { grid-column: 1 / -1; }
+.piece-title { font-weight: 600; }
+.status { font-size: 12px; border-radius: 99px; padding: 2px 8px; background: var(--surface-2); white-space: nowrap; align-self: start; }
+.st-learning { background: color-mix(in srgb, var(--accent) 22%, var(--surface)); }
+.st-tempo { background: color-mix(in srgb, var(--warn) 25%, var(--surface)); }
+.st-done { background: color-mix(in srgb, var(--good) 22%, var(--surface)); }
+.piece-edit { display: flex; flex-direction: column; gap: 8px; padding-bottom: 12px; }
+.today-pieces { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.today-pieces li { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.rec-list { list-style: none; margin: 0; padding: 0; }
+.rec-list li { border-bottom: 1px solid var(--line); padding: 6px 0; }
+.rec-list li:last-child { border-bottom: none; }
+.rec-head { display: flex; align-items: center; gap: 8px; }
+.rec-title { flex: 1; display: flex; flex-direction: column; }
+.rec-check input { width: 20px; height: 20px; }
+.rec-body, .compare-item { display: flex; flex-direction: column; gap: 6px; padding: 6px 0; }
+.player { width: 100%; }
+.rec-live { display: flex; align-items: center; gap: 8px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.rec-dot { width: 12px; height: 12px; border-radius: 50%; background: var(--bad); animation: blink 1s infinite; }
+@keyframes blink { 50% { opacity: .3; } }
+details.card > summary.card-summary > .muted { margin-right: auto; font-size: 14px; }

@@ -1,7 +1,10 @@
 import { useMemo, useState } from 'react';
 import { useSessions } from '../state/useSessions';
+import { usePieces } from '../state/usePieces';
 import { db } from '../data/db';
 import { addDays, formatDuration, localDate, streak } from '../data/dates';
+import { Pieces } from './Pieces';
+import { Recordings } from './Recordings';
 
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
 
@@ -13,8 +16,29 @@ function level(sec: number): number {
   return 4;
 }
 
+type View = 'calendar' | 'pieces' | 'recordings';
+
 export function Log() {
+  const [view, setView] = useState<View>(() => { try { return (localStorage.getItem('violin-log-view') as View) || 'calendar'; } catch { return 'calendar'; } });
+  const go = (v: View) => { setView(v); try { localStorage.setItem('violin-log-view', v); } catch { /* 무시 */ } };
+  return (
+    <section className="page log">
+      <div className="segmented" role="tablist">
+        <button className={view === 'calendar' ? 'on' : ''} onClick={() => go('calendar')}>연습 기록</button>
+        <button className={view === 'pieces' ? 'on' : ''} onClick={() => go('pieces')}>곡</button>
+        <button className={view === 'recordings' ? 'on' : ''} onClick={() => go('recordings')}>녹음</button>
+      </div>
+      {view === 'calendar' && <Calendar />}
+      {view === 'pieces' && <Pieces />}
+      {view === 'recordings' && <Recordings />}
+    </section>
+  );
+}
+
+function Calendar() {
   const sessions = useSessions();
+  const pieces = usePieces();
+  const pieceName = (id: string) => pieces.find((p) => p.id === id)?.title;
   const today = localDate();
   const [month, setMonth] = useState(() => today.slice(0, 7)); // YYYY-MM
   const [selected, setSelected] = useState(today);
@@ -49,7 +73,7 @@ export function Log() {
   const daySessions = sessions.filter((s) => s.date === selected);
 
   return (
-    <section className="page log">
+    <div className="page-sub">
       <div className="stats">
         <div><b>{st}일</b><span>연속</span></div>
         <div><b>{formatDuration(weekSec)}</b><span>이번 주</span></div>
@@ -82,11 +106,11 @@ export function Log() {
               <span>{new Date(s.startedAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })} · <b>{formatDuration(s.totalSec)}</b></span>
               <button className="mini danger" onClick={() => { if (confirm('이 기록을 지울까요?')) db.sessions.delete(s.id!); }} aria-label="기록 삭제">✕</button>
             </div>
-            <ul>{s.items.map((it) => <li key={it.key}>{it.label} <span className="muted">{formatDuration(it.sec)}</span></li>)}</ul>
+            <ul>{s.items.map((it) => <li key={it.key}>{it.label}{it.pieceId && pieceName(it.pieceId) ? ` · ${pieceName(it.pieceId)}` : ''} <span className="muted">{formatDuration(it.sec)}</span></li>)}</ul>
             {s.memo && <p className="memo">{s.memo}</p>}
           </div>
         ))}
       </div>
-    </section>
+    </div>
   );
 }

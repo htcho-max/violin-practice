@@ -5,6 +5,20 @@ import { useWakeLock } from '../state/wakeLock';
 import { useSessions } from '../state/useSessions';
 import { clock, formatDuration, localDate, streak } from '../data/dates';
 import type { TabId } from '../components/TabBar';
+import { usePieces, updatePiece } from '../state/usePieces';
+import { currentPieces, pickReview, daysAgo } from '../data/pieces';
+import type { Piece } from '../data/db';
+
+function PieceChips({ list, selected, onPick }: { list: Piece[]; selected?: string; onPick: (id: string | null) => void }) {
+  if (!list.length) return null;
+  return (
+    <div className="chips">
+      {list.map((p) => (
+        <button key={p.id} className={selected === p.id ? 'chip on' : 'chip'} onClick={() => onPick(selected === p.id ? null : p.id)}>{p.title}</button>
+      ))}
+    </div>
+  );
+}
 
 const TOOL_FOR: Record<string, { tab: TabId; label: string }> = {
   tune: { tab: 'tuner', label: '튜너 열기' },
@@ -16,7 +30,8 @@ const TOOL_FOR: Record<string, { tab: TabId; label: string }> = {
 
 export function Today({ go, openSettings }: { go: (t: TabId) => void; openSettings: () => void }) {
   const { settings, update } = useSettings();
-  const { session, now, start, pause, resume, goto, finish, discard } = useSession();
+  const { session, now, start, pause, resume, goto, finish, discard, setPiece } = useSession();
+  const pieces = usePieces();
   const sessions = useSessions();
   const [memo, setMemo] = useState('');
   const [confirmEnd, setConfirmEnd] = useState(false);
@@ -28,6 +43,34 @@ export function Today({ go, openSettings }: { go: (t: TabId) => void; openSettin
   const days = new Set(sessions.map((s) => s.date));
   const st = streak(days, today);
   const routineMin = settings.routine.reduce((a, r) => a + r.minutes, 0);
+  const current = currentPieces(pieces);
+  const review = pickReview(pieces, 2);
+
+  const piecesCard = (
+    <div className="card">
+      <div className="card-head"><b>오늘의 곡</b><button className="link small" onClick={() => go('log')}>곡 관리</button></div>
+      {current.length > 0 && <div className="muted small">연습 중</div>}
+      <ul className="today-pieces">
+        {current.slice(0, 3).map((p) => (
+          <li key={p.id}><span>{p.title}</span><span className="muted small">{p.currentBpm ? `♩${p.currentBpm}${p.targetBpm ? ` / ${p.targetBpm}` : ''}` : ''}</span></li>
+        ))}
+      </ul>
+      <div className="muted small">오늘의 복습 곡</div>
+      {review.length === 0 ? <p className="muted small">완성·복습 상태인 곡이 없어요. 기록 → 곡에서 1~3권 곡을 불러오거나 상태를 바꿔 보세요.</p> : (
+        <ul className="today-pieces" data-testid="review-list">
+          {review.map((p) => {
+            const ago = daysAgo(p.lastPracticed, today);
+            return (
+              <li key={p.id}>
+                <span>{p.book}권 · {p.title} <span className="muted small">{ago === null ? '처음' : `${ago}일 전`}</span></span>
+                <button className="mini" onClick={() => updatePiece(p.id, { lastPracticed: today })}>복습함</button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
 
   const header = (
     <div className="today-head">
@@ -59,6 +102,7 @@ export function Today({ go, openSettings }: { go: (t: TabId) => void; openSettin
           </ol>
           <button className="primary wide big" onClick={() => start(settings.routine.filter((r) => r.minutes > 0))} data-testid="session-start">▶ 연습 시작</button>
         </div>
+        {piecesCard}
       </section>
     );
   }
@@ -84,6 +128,8 @@ export function Today({ go, openSettings }: { go: (t: TabId) => void; openSettin
           <button className="primary" onClick={session.runningSince === null ? resume : pause}>{session.runningSince === null ? '▶ 계속' : '❚❚ 일시정지'}</button>
           <button disabled={isLast} onClick={() => goto(session.index + 1)} data-testid="session-next">다음 ▶</button>
         </div>
+        {cur.key === 'piece' && <PieceChips list={current} selected={session.pieces?.[cur.key]} onPick={(id) => setPiece(cur.key, id)} />}
+        {cur.key === 'review' && <PieceChips list={review} selected={session.pieces?.[cur.key]} onPick={(id) => setPiece(cur.key, id)} />}
         {tool && <button className="secondary wide" onClick={() => go(tool.tab)}>{tool.label}</button>}
       </div>
 
@@ -91,7 +137,7 @@ export function Today({ go, openSettings }: { go: (t: TabId) => void; openSettin
         <ol className="routine done-list">
           {session.items.map((it, i) => (
             <li key={it.key} className={i === session.index ? 'current' : ''} onClick={() => goto(i)}>
-              <span>{it.label}</span>
+              <span>{it.label}{session.pieces?.[it.key] ? <small className="muted"> · {pieces.find((p) => p.id === session.pieces![it.key])?.title}</small> : null}</span>
               <span className="muted">{clock(itemMs(session, i, now) / 1000)} / {it.minutes}분</span>
             </li>
           ))}

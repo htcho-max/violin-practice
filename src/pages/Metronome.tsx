@@ -4,6 +4,7 @@ import { METERS, SUBDIVISIONS, TapTempo, clampBpm, MIN_BPM, MAX_BPM } from '../a
 import { useSettings } from '../state/settings';
 import { useAudioStatus, setAudioStatus } from '../state/audioStatus';
 import { useWakeLock } from '../state/wakeLock';
+import { TempoTrainer } from '../components/TempoTrainer';
 
 function tempoName(bpm: number): string {
   if (bpm < 60) return 'Largo';
@@ -79,6 +80,8 @@ export function Metronome() {
       <button className="secondary wide" onClick={() => { const b = tap.current.tap(performance.now()); if (b) setBpm(b); }}>
         탭 템포 (박에 맞춰 여러 번 누르기)
       </button>
+
+      <TempoTrainer bpm={settings.bpm} setBpm={setBpm} running={running} />
 
       <h3>박자</h3>
       <div className="chips">

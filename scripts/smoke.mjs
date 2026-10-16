@@ -1,82 +1,150 @@
-// 빌드본으로 전체 흐름 확인: 튜너(가짜 마이크 445Hz), 메트로놈, 드론, 연습 세션 → 기록
+// 빌드본 + 가짜 마이크로 전체 흐름 확인
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 
-const wav = path.resolve('scripts/a445.wav');
 const server = spawn('npx', ['vite', 'preview', '--port', '4319', '--strictPort'], { stdio: 'ignore', detached: true });
 await new Promise((r) => setTimeout(r, 2500));
-const browser = await chromium.launch({
-  args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', `--use-file-for-fake-audio-capture=${wav}`, '--autoplay-policy=no-user-gesture-required'],
-});
-const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
-const errors = [];
-page.on('pageerror', (e) => errors.push(e.message));
-page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+const URL = 'http://localhost:4319/';
 const ok = (c, msg) => { console.log(`${c ? 'PASS' : 'FAIL'} ${msg}`); if (!c) process.exitCode = 1; };
+const num = (s) => Number(String(s).replace(/[^\d.+-]/g, ''));
+
+async function launch(wav) {
+  const browser = await chromium.launch({
+    timeout: 20000,
+    args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', `--use-file-for-fake-audio-capture=${path.resolve('scripts', wav)}`, '--autoplay-policy=no-user-gesture-required'],
+  });
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+  await page.goto(URL);
+  return { browser, page, errors };
+}
+const seen = (loc) => loc.first().waitFor({ timeout: 4000 }).then(() => true, () => false);
+const tab = (page, name) => page.locator('.tabbar').getByRole('button', { name }).click();
+
 try {
-  await page.goto('http://localhost:4319/');
-  await page.screenshot({ path: 'scripts/shot-today.png' });
+  // ── 1. 기본 흐름 (A4 +20센트) ──
+  {
+    const { browser, page, errors } = await launch('a445.wav');
+    await tab(page, '튜너');
+    await page.getByRole('button', { name: '마이크 켜기' }).click();
+    await page.waitForTimeout(2500);
+    ok((await page.getByTestId('note').textContent()) === 'A4', '튜너 음이름 A4');
+    const c = num(await page.getByTestId('cents').textContent());
+    ok(Math.abs(c - 20) <= 3, `튜너 센트 ${c} (기대 +20)`);
+    await page.screenshot({ path: 'scripts/shot-tuner.png' });
 
-  // 튜너
-  await page.getByRole('button', { name: '튜너' }).click();
-  await page.getByRole('button', { name: '마이크 켜기' }).click();
-  await page.waitForTimeout(2500);
-  const note = await page.getByTestId('note').textContent();
-  const cents = Number((await page.getByTestId('cents').textContent()).replace(/[^\d+-]/g, ''));
-  ok(note === 'A4', `튜너 음이름 = ${note}`);
-  ok(Math.abs(cents - 20) <= 3, `튜너 센트 = ${cents} (기대 +20)`);
-  await page.screenshot({ path: 'scripts/shot-tuner.png' });
-  await page.getByRole('button', { name: '현 선택' }).click();
-  await page.waitForTimeout(800);
-  const c2 = Number((await page.getByTestId('cents').textContent()).replace(/[^\d+-]/g, ''));
-  ok(Math.abs(c2 - 20) <= 3, `A현 선택 센트 = ${c2}`);
+    await tab(page, '메트로놈');
+    await page.getByRole('button', { name: '+5' }).click();
+    ok((await page.getByTestId('bpm').textContent()) === '85', 'BPM 80 → 85');
+    await page.getByTestId('metro-toggle').click();
+    await page.waitForTimeout(1200);
+    ok((await page.locator('.dot.on').count()) === 1, '박 표시');
+    // 템포 트레이너 (성공 3번 → +4)
+    await page.getByText('템포 트레이너', { exact: true }).click();
+    await page.getByTestId('ladder-start').click();
+    for (let i = 0; i < 3; i++) await page.getByTestId('ladder-ok').click();
+    ok((await page.getByTestId('bpm').textContent()) === '89', `트레이너 성공 3번 → BPM ${await page.getByTestId('bpm').textContent()}`);
+    await page.screenshot({ path: 'scripts/shot-trainer.png', fullPage: true });
+    await page.getByRole('button', { name: '트레이너 끝내기' }).click();
+    ok(/최고 ♩89/.test(await page.getByTestId('ladder-message').textContent()), '트레이너 결과 메시지');
+    await page.getByTestId('metro-toggle').click();
 
-  // 메트로놈
-  await page.getByRole('button', { name: '메트로놈' }).click();
-  await page.getByRole('button', { name: '+5' }).click();
-  ok((await page.getByTestId('bpm').textContent()) === '85', 'BPM 80 → 85');
-  await page.getByTestId('metro-toggle').click();
-  await page.waitForTimeout(1500);
-  const lit = await page.locator('.dot.on').count();
-  ok(lit === 1, `박 표시 켜짐 (${lit})`);
-  await page.screenshot({ path: 'scripts/shot-metronome.png' });
+    // 곡 목록 + 1~3권 불러오기 → 오늘의 복습 곡
+    await tab(page, '기록');
+    await page.getByRole('button', { name: '곡', exact: true }).click();
+    ok(await seen(page.getByRole('button', { name: '전체 6' })), '4권 곡 6개 기본 등록');
+    await page.getByTestId('seed-old').click();
+    await page.waitForTimeout(300);
+    ok(await seen(page.getByRole('button', { name: '전체 42' })), '1~3권 불러오기 → 42곡');
+    await page.screenshot({ path: 'scripts/shot-pieces.png' });
+    await tab(page, '오늘');
+    await seen(page.getByTestId('review-list'));
+    ok((await page.getByTestId('review-list').locator('li').count()) === 2, '오늘의 복습 곡 2개');
 
-  // 드론 (메트로놈은 다른 탭에서도 계속)
-  await page.getByRole('button', { name: '음정' }).click();
-  ok(await page.locator('.statusbar').getByText('메트로놈 85').isVisible(), '다른 탭에서 메트로놈 상태 표시');
-  await page.getByRole('button', { name: 'A단조' }).click();
-  await page.getByTestId('drone-toggle').click();
-  await page.getByRole('button', { name: '마이크 켜고 음정 보기' }).click();
-  await page.waitForTimeout(2000);
-  const droneText = await page.locator('.drone-reading').textContent();
-  ok(/A4/.test(droneText) && /옥타브/.test(droneText), `드론 기준 읽기: ${droneText}`);
-  await page.screenshot({ path: 'scripts/shot-drone.png', fullPage: true });
-  await page.locator('.statusbar').getByRole('button', { name: '■' }).click();
+    // 세션 + 곡 선택
+    await page.getByTestId('session-start').click();
+    await page.waitForTimeout(1100);
+    for (let i = 0; i < 3; i++) await page.getByTestId('session-next').click();
+    ok((await page.getByTestId('session-item').textContent()) === '곡 구간 연습', '곡 구간 연습 항목');
+    await page.locator('.session .chips .chip').first().click();
+    await page.waitForTimeout(1100);
+    await page.screenshot({ path: 'scripts/shot-session.png', fullPage: true });
+    await page.getByTestId('session-finish').click();
+    await page.getByPlaceholder(/메모/).fill('스모크 테스트');
+    await page.getByTestId('session-save').click();
+    await page.waitForTimeout(400);
+    await tab(page, '기록');
+    await page.getByRole('button', { name: '연습 기록' }).click();
+    await page.screenshot({ path: 'scripts/shot-log.png', fullPage: true });
+    ok((await page.getByText('스모크 테스트').count()) >= 1, `세션 메모 저장 (${await page.getByText('스모크 테스트').count()})`);
+    ok(await page.getByText(/곡 구간 연습 · 자이츠/).isVisible(), '세션에 곡 이름 기록');
 
-  // 연습 세션 (시계를 빠르게 하기 위해 Date.now 대신 실제 2초)
-  await page.getByRole('button', { name: '오늘' }).click();
-  await page.getByTestId('session-start').click();
-  await page.waitForTimeout(2200);
-  await page.getByTestId('session-next').click();
-  ok((await page.getByTestId('session-item').textContent()) === '음계·드론', '다음 항목으로 이동');
-  await page.waitForTimeout(1200);
-  await page.screenshot({ path: 'scripts/shot-session.png' });
-  await page.getByTestId('session-finish').click();
-  await page.getByPlaceholder(/메모/).fill('스모크 테스트');
-  await page.getByTestId('session-save').click();
-  await page.waitForTimeout(500);
-  await page.getByRole('button', { name: '기록' }).click();
-  await page.waitForTimeout(500);
-  ok(await page.getByText('스모크 테스트').isVisible(), '기록에 세션 저장');
-  await page.screenshot({ path: 'scripts/shot-log.png', fullPage: true });
+    // 녹음 2개 → 비교
+    await page.getByRole('button', { name: '녹음', exact: true }).click();
+    for (let i = 0; i < 2; i++) {
+      await page.getByTestId('rec-toggle').click();
+      await page.waitForTimeout(2500);
+      await page.getByTestId('rec-toggle').click();
+      await page.waitForTimeout(700);
+    }
+    ok(await page.getByText('녹음 2개').isVisible(), '녹음 2개 저장');
+    const boxes = page.getByRole('checkbox', { name: '비교에 넣기' });
+    await boxes.nth(0).check(); await boxes.nth(1).check();
+    ok(await page.getByTestId('compare').isVisible(), '두 녹음 비교 화면');
+    const statText = await page.getByTestId('compare').textContent();
+    ok(/평균 ±(19|20|21)센트/.test(statText), `녹음 음정 요약: ${statText.match(/평균 ±\d+센트/)?.[0]}`);
+    const dur = await page.locator('audio').first().evaluate((a) => new Promise((r) => { if (a.readyState >= 1) r(a.duration); else a.onloadedmetadata = () => r(a.duration); setTimeout(() => r(a.duration), 3000); }));
+    ok(dur > 1 || dur === Infinity, `녹음 재생 가능 (길이 ${dur})`);
+    await page.screenshot({ path: 'scripts/shot-compare.png', fullPage: true });
 
-  // 새로고침 후 설정 유지
-  await page.reload();
-  await page.getByRole('button', { name: '메트로놈' }).click();
-  ok((await page.getByTestId('bpm').textContent()) === '85', '새로고침 후 BPM 유지');
-  ok(errors.length === 0, `콘솔 오류 없음 ${errors.join(' | ')}`);
+    await page.reload();
+    await tab(page, '메트로놈');
+    ok((await page.getByTestId('bpm').textContent()) === '89', '새로고침 후 BPM 유지');
+    ok(errors.length === 0, `콘솔 오류 없음 ${errors.join(' | ')}`);
+    await browser.close();
+  }
+
+  // ── 2. 음계 + 포지션 이동 ──
+  {
+    const { browser, page, errors } = await launch('phrases.wav');
+    await tab(page, '음정');
+    await page.getByTestId('mic-toggle').click();
+    await page.waitForTimeout(5000);
+    const rows = await page.getByTestId('note-summary').locator('tbody tr').allTextContents();
+    ok(rows.length >= 4, `음별 평균 오차 ${rows.length}음: ${rows.slice(0, 4).join(' / ')}`);
+    // B4 는 두 번(+12, 0) → 평균 +6, C#5 는 -6
+    ok(rows.some((r) => /^B4\+[5-7]2$/.test(r)) && rows.some((r) => /^C#5-[5-7]1$/.test(r)), `B4 평균 +6(2회), C#5 -6: ${rows.join(' / ')}`);
+    await page.screenshot({ path: 'scripts/shot-graph.png', fullPage: true });
+    await page.getByRole('button', { name: '도착 음정' }).click();
+    const arr = await page.getByTestId('arrival-table').textContent();
+    ok(/D5\+2\d/.test(arr) && /고쳐 잡음/.test(arr), '이동 뒤 D5 도착 +2x → 고쳐 잡음 표시');
+    await page.screenshot({ path: 'scripts/shot-arrival.png', fullPage: true });
+    ok(errors.length === 0, `콘솔 오류 없음 ${errors.join(' | ')}`);
+    await browser.close();
+  }
+
+  // ── 3. 비브라토 ──
+  {
+    const { browser, page, errors } = await launch('vibrato.wav');
+    await tab(page, '음정');
+    await page.getByTestId('mic-toggle').click();
+    await page.getByRole('button', { name: '비브라토' }).click();
+    await page.waitForTimeout(3000);
+    const t = await page.getByTestId('vibrato-stats').textContent();
+    const [rate, width] = [num(t.match(/[\d.]+ Hz/)[0]), num(t.match(/±\d+/)[0])];
+    ok(Math.abs(rate - 6) < 0.5, `비브라토 속도 ${rate}Hz (기대 6)`);
+    ok(Math.abs(width - 25) <= 6, `비브라토 폭 ±${width} (기대 ±25)`);
+    await page.screenshot({ path: 'scripts/shot-vibrato.png', fullPage: true });
+    ok(errors.length === 0, `콘솔 오류 없음 ${errors.join(' | ')}`);
+    await browser.close();
+  }
+} catch (e) {
+  console.log('FAIL 예외', e.message.split('\n')[0]);
+  process.exitCode = 1;
 } finally {
-  await browser.close();
-  server.kill();
+  try { process.kill(-server.pid, 'SIGKILL'); } catch {}
+  process.exit(process.exitCode ?? 0);
 }

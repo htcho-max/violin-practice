@@ -9,6 +9,7 @@ export interface ActiveSession {
   index: number;
   accum: number[]; // 항목별 누적 ms
   runningSince: number | null; // null이면 일시정지
+  pieces?: Record<string, string>; // 루틴 항목 → 곡 id
 }
 
 const STORE = 'violin-active-session';
@@ -57,6 +58,7 @@ interface Ctx {
   goto: (i: number) => void;
   finish: (memo?: string) => Promise<void>;
   discard: () => void;
+  setPiece: (itemKey: string, pieceId: string | null) => void;
 }
 const SessionContext = createContext<Ctx | null>(null);
 
@@ -76,22 +78,30 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const resume = useCallback(() => setSession((s) => (s ? transitions.resume(s, Date.now()) : s)), []);
   const goto = useCallback((i: number) => setSession((s) => (s ? transitions.goto(s, i, Date.now()) : s)), []);
   const discard = useCallback(() => setSession(null), []);
+  const setPiece = useCallback((itemKey: string, pieceId: string | null) => setSession((s) => {
+    if (!s) return s;
+    const pieces = { ...(s.pieces ?? {}) };
+    if (pieceId) pieces[itemKey] = pieceId; else delete pieces[itemKey];
+    return { ...s, pieces };
+  }), []);
   const finish = useCallback(async (memo?: string) => {
     if (!session) return;
     const t = Date.now();
     const done = transitions.pause(session, t);
     const items = done.items
-      .map((it, i) => ({ key: it.key, label: it.label, sec: Math.round(done.accum[i] / 1000) }))
+      .map((it, i) => ({ key: it.key, label: it.label, sec: Math.round(done.accum[i] / 1000), ...(done.pieces?.[it.key] ? { pieceId: done.pieces[it.key] } : {}) }))
       .filter((it) => it.sec > 0);
     const totalSec = items.reduce((a, b) => a + b.sec, 0);
     if (totalSec > 0) {
-      await db.sessions.add({ date: localDate(new Date(done.startedAt)), startedAt: done.startedAt, totalSec, items, memo: memo || undefined });
+      const date = localDate(new Date(done.startedAt));
+      await db.sessions.add({ date, startedAt: done.startedAt, totalSec, items, memo: memo || undefined });
+      for (const it of items) if (it.pieceId) await db.pieces.update(it.pieceId, { lastPracticed: date });
     }
     setSession(null);
   }, [session]);
 
   return (
-    <SessionContext.Provider value={{ session, now, start, pause, resume, goto, finish, discard }}>
+    <SessionContext.Provider value={{ session, now, start, pause, resume, goto, finish, discard, setPiece }}>
       {children}
     </SessionContext.Provider>
   );
