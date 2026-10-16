@@ -3,7 +3,8 @@ import { liveQuery } from 'dexie';
 import { db, type ExerciseProgress, type ScoreFile } from '../data/db';
 import { STAGES, STEPS, PATTERNS, POSITION_SETS, STRING_NAMES, makeExercise, type ExerciseSpec, type PatternId, type PositionSet, type Step } from '../exercise/curriculum';
 import { BOWINGS, RHYTHMS, type Bowing, type FingerShow } from '../exercise/build';
-import { KEYS } from '../exercise/theory';
+import { KEYS, keyById } from '../exercise/theory';
+import { BOW_BASES, BOW_KEYS, BOW_VARIANTS, bowProgressId, variantById, type BowBaseId } from '../exercise/bow';
 
 export interface ExerciseOptions { perBeat: number; bowing: Bowing; fingers: FingerShow }
 const DEFAULT_OPTS: ExerciseOptions = { perBeat: 2, bowing: 'detache', fingers: 'all' };
@@ -38,13 +39,20 @@ export async function recordProgress(stepId: string, pct: number, mean: number |
 }
 
 /** 연습곡을 만들어 저장하고 id 를 돌려줌 (같은 단계는 한 장을 덮어씀) */
-export async function createExercise(stepId: string, spec: ExerciseSpec, o: ExerciseOptions, seed: number, tempo: number, tip?: string, title?: string): Promise<number> {
+export async function createExercise(stepId: string, spec: ExerciseSpec, o: ExerciseOptions, seed: number, tempo: number, tip?: string, title?: string, progressId?: string): Promise<number> {
   const m = makeExercise(spec, { ...o, seed, tempo, title });
   if (m.error || !m.xml) throw new Error(m.error ?? '연습곡을 만들지 못했어요.');
   const existing = await db.scores.filter((s) => s.exercise?.stepId === stepId).first();
-  const rec: Omit<ScoreFile, 'id'> = { title: m.title, xml: m.xml, createdAt: Date.now(), exercise: { stepId, spec, seed, shiftKeys: m.shiftKeys, tip, tempo } };
+  const rec: Omit<ScoreFile, 'id'> = { title: m.title, xml: m.xml, createdAt: Date.now(), exercise: { stepId, spec, seed, shiftKeys: m.shiftKeys, tip, tempo, progressId } };
   if (existing?.id) { await db.scores.update(existing.id, { ...rec, lastFrom: undefined, lastTo: undefined }); return existing.id; }
   return db.scores.add(rec as ScoreFile);
+}
+
+/** 활 연습 한 장 만들기 (활 연습은 모두 한 장을 덮어씀) */
+export function createBow(base: BowBaseId, key: string, variant: string, o: ExerciseOptions, tempo = 50): Promise<number> {
+  const v = variantById(variant);
+  const b = BOW_BASES.find((x) => x.id === base)!;
+  return createExercise('bow', { key, pattern: 'bow', positions: '1-3', base, variant: v.id }, o, 1, tempo, `${v.tip} ${b.tip}`, undefined, bowProgressId(base, key, v.id));
 }
 
 export function Exercises({ onOpen, onBack }: { onOpen: (id: number) => void; onBack: () => void }) {
@@ -53,6 +61,15 @@ export function Exercises({ onOpen, onBack }: { onOpen: (id: number) => void; on
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [custom, setCustom] = useState<{ key: string; pattern: PatternId; positions: PositionSet; string: number }>({ key: 'G', pattern: 'scale', positions: '1', string: 2 });
+  const [bowBase, setBowBase] = useState<BowBaseId>(() => { try { return (localStorage.getItem('violin-bow-base') as BowBaseId) || 'open'; } catch { return 'open'; } });
+  const [bowKey, setBowKey] = useState(() => { try { return localStorage.getItem('violin-bow-key') || 'G'; } catch { return 'G'; } });
+  useEffect(() => { try { localStorage.setItem('violin-bow-base', bowBase); localStorage.setItem('violin-bow-key', bowKey); } catch { /* 무시 */ } }, [bowBase, bowKey]);
+  async function openBow(variant: string) {
+    setError(null); setBusy(true);
+    try { onOpen(await createBow(bowBase, bowKey, variant, opts)); } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+  }
+  const bowHasKey = BOW_BASES.find((b) => b.id === bowBase)!.keys;
+  const bowDone = BOW_VARIANTS.filter((v) => progress[bowProgressId(bowBase, bowKey, v.id)]?.passed).length;
   const set = (p: Partial<ExerciseOptions>) => { const n = { ...opts, ...p }; setOpts(n); saveOpts(n); };
 
   async function open(step: Step, newSeed = false) {
@@ -123,6 +140,36 @@ export function Exercises({ onOpen, onBack }: { onOpen: (id: number) => void; on
           </ul>
         </div>
       ))}
+
+      <div className="card" data-testid="bow-card">
+        <b>5단계 · 활 연습 (세브치크식)</b>
+        <p className="hint">짧은 악구 하나를 24가지 활 쓰기로 바꿔 가며 연습해요. 세브치크 Op.2 방식이에요. 앱은 활을 볼 수 없어서 채점은 음정만 해요. 활은 거울을 보거나 녹음해서 확인하세요. 처음엔 ♩=50 정도로 느리게. <b>이 악구 {bowDone}/{BOW_VARIANTS.length} 통과</b></p>
+        <div className="row-setting">
+          <select value={bowBase} onChange={(e) => setBowBase(e.target.value as BowBaseId)} aria-label="기본 악구" data-testid="bow-base">
+            {BOW_BASES.map((b) => <option key={b.id} value={b.id}>{b.label}</option>)}
+          </select>
+          {bowHasKey && (
+            <select value={bowKey} onChange={(e) => setBowKey(e.target.value)} aria-label="조">
+              {BOW_KEYS.map((k) => <option key={k} value={k}>{keyById(k).name}</option>)}
+            </select>
+          )}
+        </div>
+        <ul className="rec-list">
+          {BOW_VARIANTS.map((v) => {
+            const pr = progress[bowProgressId(bowBase, bowKey, v.id)];
+            return (
+              <li key={v.id}>
+                <div className="rec-head">
+                  <button className="link rec-title" onClick={() => openBow(v.id)} disabled={busy} data-testid={`bow-${v.id}`}>
+                    <b>{pr?.passed ? '✓ ' : ''}{v.id}. {v.label}</b>
+                    {pr && <span className="muted small">최고 {pr.best}%{pr.bpm ? ` · ♩=${pr.bpm} 통과` : ''}</span>}
+                  </button>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
 
       <div className="card">
         <b>직접 만들기</b>

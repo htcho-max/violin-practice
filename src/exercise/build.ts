@@ -21,6 +21,16 @@ export const RHYTHMS: { perBeat: number; label: string }[] = [
 ];
 export type FingerShow = 'all' | 'shifts' | 'none';
 
+/** 세브치크식 활 변형: 슬러 묶음 크기(반복), 리듬(반복, DIV 단위), 꾸밈 */
+export interface BowPattern {
+  groups: number[];
+  rhythm?: number[];
+  stacc?: 'all' | 'slurred';
+  accent?: boolean; // 박의 첫 음
+  upBow?: boolean; // 올림활로 시작
+  words?: string; // 활 쓰는 곳
+}
+
 export interface BuildOptions {
   title: string;
   key: Key;
@@ -30,8 +40,9 @@ export interface BuildOptions {
   fo: FingerOptions;
   fingers: FingerShow;
   tempo?: number;
+  bow?: BowPattern;
 }
-export interface BuiltNote { p: Pitch | null; dur: number; f: Fingering | null; hand: number; shift: boolean; slur?: 'start' | 'stop'; stacc?: boolean }
+export interface BuiltNote { p: Pitch | null; dur: number; f: Fingering | null; hand: number; shift: boolean; slur?: 'start' | 'stop'; stacc?: boolean; accent?: boolean; bowMark?: 'up' | 'down'; words?: string }
 export interface Built { xml: string; notes: BuiltNote[]; shiftKeys: string[]; measures: number; error?: string }
 
 /** 패턴 → 리듬·활·운지가 붙은 음 목록 */
@@ -43,36 +54,44 @@ export function arrange(o: BuildOptions): BuiltNote[] {
   const out: BuiltNote[] = [];
   let pos = 0, k = 0;
   const groupLen = o.bowing === 'slur2' ? 2 : o.bowing === 'slurBeat' ? o.perBeat : o.bowing === 'slur2Beats' ? o.perBeat * 2 : 1;
+  const bow: BowPattern = o.bow ?? { groups: [groupLen], stacc: o.bowing === 'staccato' ? 'all' : undefined };
   o.phrases.forEach((ph, pi) => {
     const lastPhrase = pi === o.phrases.length - 1;
     const start = out.length;
     ph.forEach((n, j) => {
-      let dur = u;
+      let dur = bow.rhythm ? bow.rhythm[j % bow.rhythm.length] : u;
       const isFinal = lastPhrase && j === ph.length - 1;
       const isEnd = j === ph.length - (lastPhrase ? 2 : 1); // 프레이즈 끝 (마침음 앞 음 포함)
       if (isFinal) dur = MEAS - (pos % MEAS); // 마침음은 마디 끝까지 (항상 박 위에서 시작)
-      else if (isEnd) dur = (pos + u) % DIV === 0 ? u : DIV - (pos % DIV); // 박 끝까지 늘림
+      else if (isEnd) dur = (pos + dur) % DIV === 0 ? dur : DIV - (pos % DIV); // 박 끝까지 늘림
       const f = fs[k];
       const shift = k > 0 && hands[k] !== hands[k - 1];
-      out.push({ p: n.p, dur, f, hand: hands[k], shift, stacc: o.bowing === 'staccato' });
+      out.push({ p: n.p, dur, f, hand: hands[k], shift, stacc: bow.stacc === 'all' && !isFinal, accent: bow.accent && pos % DIV === 0 && !isFinal });
       pos += dur; k++;
     });
     // 슬러 묶음 (프레이즈 안에서만, 마침음은 제외)
-    if (groupLen > 1) {
+    {
       const end = lastPhrase ? out.length - 1 : out.length;
-      for (let a = start; a < end; a += groupLen) {
-        const b = Math.min(end, a + groupLen) - 1;
-        if (b > a) { out[a].slur = 'start'; out[b].slur = 'stop'; }
+      let a = start, g = 0;
+      while (a < end) {
+        const size = bow.groups[g++ % bow.groups.length];
+        const b = Math.min(end, a + size) - 1;
+        if (b > a) {
+          out[a].slur = 'start'; out[b].slur = 'stop';
+          if (bow.stacc === 'slurred') for (let x = a; x <= b; x++) out[x].stacc = true;
+        }
+        a += size;
       }
     }
   });
+  if (out.length) { out[0].bowMark = bow.upBow ? 'up' : o.bow ? 'down' : undefined; out[0].words = bow.words; }
   // 마지막 박이 덜 찼으면 쉼표로 채우기
   while (pos % MEAS !== 0) { const d = pos % DIV ? DIV - (pos % DIV) : DIV; out.push({ p: null, dur: d, f: null, hand: 0, shift: false }); pos += d; }
   return out;
 }
 
 const TYPES: Record<number, [string, number, boolean]> = { // dur → [type, dots, triplet]
-  4: ['16th', 0, true], 6: ['16th', 0, false], 8: ['eighth', 0, true], 12: ['eighth', 0, false], 16: ['quarter', 0, true],
+  3: ['32nd', 0, false], 9: ['16th', 1, false], 4: ['16th', 0, true], 6: ['16th', 0, false], 8: ['eighth', 0, true], 12: ['eighth', 0, false], 16: ['quarter', 0, true],
   18: ['eighth', 1, false], 24: ['quarter', 0, false], 36: ['quarter', 1, false], 48: ['half', 0, false], 72: ['half', 1, false], 96: ['whole', 0, false],
 };
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
@@ -101,6 +120,7 @@ export function toMusicXML(o: BuildOptions, notes: BuiltNote[]): Built {
       cur.push(`<direction placement="above"><direction-type><words font-size="9">${POS_NAME[n.hand] ?? n.hand + '포지션'}</words></direction-type></direction>`);
       shownHand = n.hand;
     }
+    if (n.words) cur.push(`<direction placement="above"><direction-type><words font-size="9" font-style="italic">${esc(n.words)}</words></direction-type></direction>`);
     const x: string[] = ['<note>'];
     if (n.p) {
       const L = letterOf(n.p.d), oct = octaveOf(n.p.d);
@@ -113,12 +133,13 @@ export function toMusicXML(o: BuildOptions, notes: BuiltNote[]): Built {
       x.push(`<rest/><duration>${n.dur}</duration><voice>1</voice><type>${type}</type>${'<dot/>'.repeat(dots)}`);
     }
     if (trip) x.push('<time-modification><actual-notes>3</actual-notes><normal-notes>2</normal-notes></time-modification>');
-    if (beams[i]) for (let l = 1; l <= (n.dur <= 6 ? 2 : 1); l++) x.push(`<beam number="${l}">${beams[i]}</beam>`);
+    beams[i].forEach((b, l) => x.push(`<beam number="${l + 1}">${b}</beam>`));
     const nots: string[] = [];
     if (trip && pos % DIV === 0) { nots.push('<tuplet type="start" bracket="no"/>'); tupletOpen = true; }
     if (trip && tupletOpen && (pos + n.dur) % DIV === 0) { nots.push('<tuplet type="stop"/>'); tupletOpen = false; }
     if (n.slur) nots.push(`<slur type="${n.slur}" number="1"/>`);
-    if (n.stacc && n.p) nots.push('<articulations><staccato/></articulations>');
+    if (n.p && (n.stacc || n.accent)) nots.push(`<articulations>${n.accent ? '<accent/>' : ''}${n.stacc ? '<staccato/>' : ''}</articulations>`);
+    if (n.bowMark) nots.push(n.bowMark === 'up' ? '<technical><up-bow/></technical>' : '<technical><down-bow/></technical>');
     const showF = n.p && n.f && (o.fingers === 'all' || (o.fingers === 'shifts' && (n.shift || i === 0)));
     if (showF) nots.push(`<technical><fingering>${n.f!.finger}</fingering></technical>`);
     if (nots.length) x.push(`<notations>${nots.join('')}</notations>`);
@@ -137,15 +158,31 @@ export function toMusicXML(o: BuildOptions, notes: BuiltNote[]): Built {
   return { xml, notes, shiftKeys, measures: measures.length };
 }
 
-/** 박 안에서 8분·16분 음을 빔으로 묶기 */
-function beamPlan(notes: BuiltNote[]): (string | null)[] {
-  const out: (string | null)[] = notes.map(() => null);
+const LEVEL: Record<string, number> = { eighth: 1, '16th': 2, '32nd': 3 };
+/** 박 안에서 8분·16분·32분 음을 빔으로 묶기 (음마다 빔 단계별 상태) */
+function beamPlan(notes: BuiltNote[]): string[][] {
+  const out: string[][] = notes.map(() => []);
   let pos = 0, group: number[] = [];
-  const close = () => { if (group.length >= 2) group.forEach((g, j) => (out[g] = j === 0 ? 'begin' : j === group.length - 1 ? 'end' : 'continue')); group = []; };
+  const close = () => {
+    if (group.length >= 2) {
+      const lv = group.map((g) => LEVEL[TYPES[notes[g].dur][0]]);
+      for (let L = 1; L <= 3; L++) {
+        let j = 0;
+        while (j < group.length) {
+          if (lv[j] < L) { j++; continue; }
+          let e = j; while (e + 1 < group.length && lv[e + 1] >= L) e++;
+          if (e > j) for (let q = j; q <= e; q++) out[group[q]].push(q === j ? 'begin' : q === e ? 'end' : 'continue');
+          else if (L > 1) out[group[j]].push(j === 0 ? 'forward hook' : 'backward hook');
+          j = e + 1;
+        }
+      }
+    }
+    group = [];
+  };
   notes.forEach((n, i) => {
     if (pos % DIV === 0) close();
     const t = TYPES[n.dur];
-    if (n.p && t && (t[0] === 'eighth' || t[0] === '16th') && Math.floor(pos / DIV) === Math.floor((pos + n.dur - 1) / DIV)) group.push(i);
+    if (n.p && t && LEVEL[t[0]] && Math.floor(pos / DIV) === Math.floor((pos + n.dur - 1) / DIV)) group.push(i);
     else close();
     pos += n.dur;
   });

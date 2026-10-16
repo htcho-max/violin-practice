@@ -1,9 +1,10 @@
 import { keyById, type Key } from './theory';
 import type { FingerOptions } from './fingering';
 import { scale, arpeggio, thirds, seq4, stringScale, shiftDrill, etude, autoRange, type Phrase } from './patterns';
+import { bowBase, variantById, BOW_BASES, type BowBaseId } from './bow';
 import { build, type Bowing, type FingerShow, type Built } from './build';
 
-export type PatternId = 'scale' | 'arpeggio' | 'thirds' | 'seq4' | 'stringScale' | 'shiftDrill' | 'etude';
+export type PatternId = 'bow' | 'scale' | 'arpeggio' | 'thirds' | 'seq4' | 'stringScale' | 'shiftDrill' | 'etude';
 export type PositionSet = '1' | '3' | '1-3';
 export const PATTERNS: { id: PatternId; label: string }[] = [
   { id: 'scale', label: '음계' },
@@ -29,6 +30,8 @@ export interface ExerciseSpec {
   string?: number; // 한 현 연습
   perBeat?: number; // 단계가 정한 리듬 (없으면 사용자 선택)
   bowing?: Bowing;
+  base?: BowBaseId; // 활 연습 기본 악구
+  variant?: string; // 활 변형 번호
 }
 export interface Step { id: string; stage: string; title: string; tip: string; spec: ExerciseSpec; tempo: number }
 
@@ -76,6 +79,14 @@ export function makeExercise(spec: ExerciseSpec, o: MakeOptions): Made {
   const fo = fingerOptions(spec.positions, spec.string);
   const perBeat = spec.perBeat ?? o.perBeat;
   const bowing = spec.bowing ?? o.bowing;
+  if (spec.pattern === 'bow') {
+    const base = spec.base ?? 'open';
+    const v = variantById(spec.variant ?? '1');
+    const bl = BOW_BASES.find((b) => b.id === base)!;
+    const title = o.title ?? `활 연습 ${v.id}. ${v.label} · ${bl.keys ? key.name + ' ' : ''}${bl.label}`;
+    const b = build({ title, key: base === 'open' ? keyById('C') : key, phrases: bowBase(key, base), perBeat: 4, bowing: 'detache', bow: v.pattern, fo: { positions: [1, 3] }, fingers: o.fingers, tempo: o.tempo });
+    return { ...b, title, describe: '' };
+  }
   let phrases: Phrase[];
   let rangeText = '';
   const posLabel = POSITION_SETS.find((p) => p.id === spec.positions)!.label;

@@ -204,6 +204,18 @@ try {
     ok(h1 !== h2 && /#2/.test(await page.locator('.score-title').textContent()), '다른 에튀드 만들기');
     await page.screenshot({ path: 'scripts/shot-etude.png', fullPage: true });
     await page.getByRole('button', { name: '◀ 목록' }).click();
+    // 활 연습 (세브치크식)
+    await page.getByTestId('bow-base').selectOption('cross2');
+    await page.getByTestId('bow-7').click();
+    await page.getByTestId('bow-next').waitFor({ timeout: 5000 });
+    await page.waitForTimeout(1200);
+    ok(/7\. 4음 슬러/.test(await page.locator('.score-title').textContent()), '활 변형 7 (4음 슬러) 만들기');
+    ok(Number(await page.getByTestId('play-bpm').inputValue()) === 50, '활 연습 템포 ♩=50');
+    await page.getByTestId('bow-next').click();
+    await page.waitForTimeout(2000);
+    ok(/8\. 8음 슬러/.test(await page.locator('.score-title').textContent()), '다음 변형으로 넘어가기');
+    await page.screenshot({ path: 'scripts/shot-bow.png', fullPage: true });
+    await page.getByRole('button', { name: '◀ 목록' }).click();
     await page.getByRole('button', { name: '◀ 목록' }).click();
     ok(/내 악보 0개/.test(await page.locator('.page').textContent()), '연습곡은 내 악보 목록과 따로');
     ok(errors.length === 0, `콘솔 오류 없음 ${errors.join(' | ')}`);

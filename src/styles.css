@@ -133,6 +133,7 @@ input[type=range], input[type=checkbox] { accent-color: var(--accent); }
 .progress div { height: 100%; background: var(--accent); transition: width 400ms; }
 .session-controls { display: flex; gap: 8px; }
 .session-controls button { flex: 1; white-space: nowrap; padding: 10px 8px; }
+.session-controls > span { align-self: center; white-space: nowrap; }
 .finish { display: flex; flex-direction: column; gap: 8px; }
 textarea { width: 100%; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); padding: 10px; resize: vertical; }
 

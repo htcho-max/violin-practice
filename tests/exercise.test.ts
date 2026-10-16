@@ -37,3 +37,19 @@ describe('모든 단계 악보 만들기', () => {
     }
   }
 });
+
+import { BOW_BASES, BOW_VARIANTS, BOW_KEYS } from '../src/exercise/bow';
+describe('활 연습 (세브치크식)', () => {
+  for (const b of BOW_BASES) for (const k of b.keys ? BOW_KEYS : ['G']) for (const v of BOW_VARIANTS) {
+    it(`${b.id} ${k} ${v.id}`, () => {
+      const m = makeExercise({ key: k, pattern: 'bow', positions: '1-3', base: b.id, variant: v.id }, { perBeat: 4, bowing: 'detache', fingers: 'shifts', seed: 1 });
+      expect(m.error).toBeUndefined();
+      const p = parseMusicXML(m.xml);
+      expect(p.measures.length).toBe(3);
+      for (const [, len] of p.measureLen) expect(len).toBe(4);
+      expect(p.notes.length).toBe(33);
+      expect(m.notes.filter((n) => n.p && !n.f).length).toBe(0);
+      if (v.pattern.groups[0] > 1) expect(m.xml).toContain('<slur type="start"');
+    });
+  }
+});

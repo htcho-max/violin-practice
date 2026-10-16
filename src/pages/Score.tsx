@@ -14,7 +14,8 @@ import { usePieces } from '../state/usePieces';
 import { usePitch } from '../state/usePitch';
 import { useSettings } from '../state/settings';
 import { useWakeLock } from '../state/wakeLock';
-import { Exercises, createExercise, loadOpts, recordProgress } from './Exercises';
+import { Exercises, createExercise, createBow, loadOpts, recordProgress } from './Exercises';
+import { BOW_VARIANTS } from '../exercise/bow';
 import { STEPS } from '../exercise/curriculum';
 
 function useScores(): ScoreFile[] {
@@ -247,7 +248,7 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
       if (ex && from <= firstNoteMeasure && to >= last && r.length) {
         const sm = summarizeScore(r);
         const pct = Math.round((sm.ok / Math.max(1, sm.total)) * 100);
-        recordProgress(ex.stepId, pct, sm.meanAbs, playBpm).then((ok) => setPassMsg(ok ? '통과! 다음 단계로 가거나 템포를 올려 보세요.' : null));
+        recordProgress(ex.progressId ?? ex.stepId, pct, sm.meanAbs, playBpm).then((ok) => setPassMsg(ok ? '통과! 다음 단계로 가거나 템포를 올려 보세요.' : null));
       }
     }, 0);
   }
@@ -266,8 +267,16 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
     try { await createExercise(ex.stepId, ex.spec, loadOpts(), ex.seed + 1, ex.tempo, ex.tip); }
     finally { setRegenBusy(false); }
   }
+  const bowIdx = ex?.spec.pattern === 'bow' ? BOW_VARIANTS.findIndex((v) => v.id === ex.spec.variant) : -1;
+  async function goVariant(step: number) {
+    if (!ex || bowIdx < 0) return;
+    const v = BOW_VARIANTS[(bowIdx + step + BOW_VARIANTS.length) % BOW_VARIANTS.length];
+    setRegenBusy(true);
+    try { await createBow(ex.spec.base ?? 'open', ex.spec.key, v.id, loadOpts(), playBpm); } finally { setRegenBusy(false); }
+  }
   async function rebuild() {
     if (!ex) return;
+    if (bowIdx >= 0) return goVariant(0);
     setRegenBusy(true);
     try { await createExercise(ex.stepId, ex.spec, loadOpts(), ex.seed, ex.tempo, ex.tip); } finally { setRegenBusy(false); }
   }
@@ -283,6 +292,13 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
 
       {ex && (
         <div className="card" data-testid="exercise-card">
+          {bowIdx >= 0 && (
+            <div className="session-controls">
+              <button onClick={() => goVariant(-1)} disabled={regenBusy || playing || listening}>◀ 이전 변형</button>
+              <span className="muted small">{bowIdx + 1} / {BOW_VARIANTS.length}</span>
+              <button onClick={() => goVariant(1)} disabled={regenBusy || playing || listening} data-testid="bow-next">다음 변형 ▶</button>
+            </div>
+          )}
           {(step?.tip ?? ex.tip) && <p className="hint"><b>팁</b> {step?.tip ?? ex.tip}</p>}
           {ex.shiftKeys.length > 0 && <p className="hint">포지션을 옮기는 음 {ex.shiftKeys.length}개는 채점 뒤에 따로 보여줘요.</p>}
           <div className="session-controls">
