@@ -2,6 +2,9 @@ import { resumeAudio } from '../audio/context';
 import { stringWave } from '../audio/timbre';
 import { midiToFreq } from '../audio/notes';
 import type { ParsedScore, ScoreNote } from './parse';
+import { loadViolinSamples, scheduleViolinNote } from '../audio/violinSampler';
+
+export type Voice = 'sample' | 'synth';
 
 export interface PlayEvent { note: ScoreNote; time: number; dur: number } // 초
 export interface PlanOptions { bpm: number; from: number; to: number; countIn: boolean }
@@ -36,24 +39,35 @@ export class ScorePlayer {
   private timers: ReturnType<typeof setTimeout>[] = [];
   private ctx: AudioContext | null = null;
   playing = false;
+  usedSample = false;
 
   async play(
     plan: ReturnType<typeof planPlayback>,
-    opts: { a4: number; click: boolean; volume?: number; onNote?: (e: PlayEvent | null) => void; onEnd?: () => void },
+    opts: { a4: number; click: boolean; volume?: number; voice?: Voice; onNote?: (e: PlayEvent | null) => void; onEnd?: () => void },
   ) {
     this.stop();
     const ctx = await resumeAudio();
     this.ctx = ctx;
     this.playing = true;
+    // 실제 바이올린 샘플 (못 불러오면 합성음으로)
+    const useSample = (opts.voice ?? 'sample') === 'sample' && (await loadViolinSamples(ctx));
+    this.usedSample = useSample;
     const t0 = ctx.currentTime + 0.15;
     const wave = stringWave(ctx);
     const master = ctx.createGain();
-    master.gain.value = opts.volume ?? 0.35;
+    master.gain.value = opts.volume ?? 0.5;
     const lp = ctx.createBiquadFilter();
     lp.type = 'lowpass';
     lp.frequency.value = 3500;
     lp.connect(master).connect(ctx.destination);
     for (const e of plan.events) {
+      const a0 = t0 + e.time;
+      this.timers.push(setTimeout(() => opts.onNote?.(e), Math.max(0, (a0 - ctx.currentTime) * 1000)));
+      if (useSample) {
+        // 다음 음과 살짝 겹치게 (레가토)
+        const n = scheduleViolinNote(ctx, master, e.note.midi, a0, e.dur * 0.98, opts.a4, 0.9);
+        if (n) { this.nodes.push(n); continue; }
+      }
       const osc = ctx.createOscillator();
       osc.setPeriodicWave(wave);
       const f = midiToFreq(e.note.midi, opts.a4);
@@ -80,7 +94,6 @@ export class ScorePlayer {
       osc.start(a);
       osc.stop(a + len + 0.02);
       this.nodes.push(osc);
-      this.timers.push(setTimeout(() => opts.onNote?.(e), Math.max(0, (a - ctx.currentTime) * 1000)));
     }
     const firstNote = plan.events.length ? plan.events[0].time : Infinity;
     for (const c of plan.clicks) {

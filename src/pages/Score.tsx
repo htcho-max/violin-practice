@@ -5,7 +5,7 @@ import { db, type ScoreFile } from '../data/db';
 import { parseMusicXML, notesInRange, type ParsedScore } from '../score/parse';
 import { alignNotes, summarizeScore, type Played, type Scored } from '../score/align';
 import { createOSMD, colorNotes, noteElements } from '../score/osmd';
-import { planPlayback, scorePlayer } from '../score/player';
+import { planPlayback, scorePlayer, type Voice } from '../score/player';
 import { NoteSegmenter, equalRef } from '../audio/segment';
 import { pitchTracker } from '../audio/pitchTracker';
 import { midiName } from '../audio/notes';
@@ -120,6 +120,8 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
   const [withClick, setWithClick] = useState(false);
   const [countIn, setCountIn] = useState(true);
   const [loop, setLoop] = useState(false);
+  const [voice, setVoice] = useState<Voice>('sample');
+  const [voiceNote, setVoiceNote] = useState('');
   const [nowMeasure, setNowMeasure] = useState<number | null>(null);
   const loopRef = useRef(loop);
   loopRef.current = loop;
@@ -188,9 +190,11 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
     await scorePlayer.play(plan, {
       a4: settings.a4,
       click: withClick,
+      voice,
       onNote: (e) => { highlight(e ? `${e.note.measure}:${e.note.index}` : null); setNowMeasure(e ? e.note.measure : null); },
       onEnd: () => { if (loopRef.current) playRange(); else setPlaying(false); },
     });
+    setVoiceNote(voice === 'sample' && !scorePlayer.usedSample ? '바이올린 소리를 불러오지 못해서 합성음으로 재생해요. (첫 재생은 인터넷 연결이 필요해요)' : '');
   }
   function stopPlay() { scorePlayer.stop(); highlight(null); setNowMeasure(null); setPlaying(false); }
 
@@ -255,6 +259,11 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
           <label><input type="checkbox" checked={withClick} onChange={(e) => setWithClick(e.target.checked)} /> 메트로놈</label>
           <label><input type="checkbox" checked={loop} onChange={(e) => setLoop(e.target.checked)} /> 반복</label>
         </div>
+        <div className="segmented small">
+          <button className={voice === 'sample' ? 'on' : ''} onClick={() => setVoice('sample')} disabled={playing}>바이올린 녹음</button>
+          <button className={voice === 'synth' ? 'on' : ''} onClick={() => setVoice('synth')} disabled={playing}>합성음</button>
+        </div>
+        {voiceNote && <p className="hint">{voiceNote}</p>}
         <button className={`secondary wide ${playing ? 'on' : ''}`} onClick={playing ? stopPlay : playRange} disabled={!expected.length} data-testid="play-toggle">
           {playing ? '■ 듣기 멈추기' : `▶ ${from}~${to}마디 들어보기`}
         </button>

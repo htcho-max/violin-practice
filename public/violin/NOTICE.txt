@@ -1,0 +1,4 @@
+바이올린 샘플 출처: npm 패키지 tonejs-instrument-violin-mp3 1.1.1 (MIT 표기)
+https://www.npmjs.com/package/tonejs-instrument-violin-mp3
+원본: tonejs-instruments (https://github.com/nbrosowsky/tonejs-instruments)
+앱에서 쓰기 위해 6초로 자르고 80kbps 모노로 다시 인코딩했습니다.

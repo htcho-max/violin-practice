@@ -21,7 +21,7 @@ export default defineConfig(({ mode }) => ({
       registerType: 'autoUpdate',
       // 악보 표시 라이브러리(약 1.5MB)도 오프라인에서 쓰도록 캐시
       workbox: { maximumFileSizeToCacheInBytes: 5 * 1024 * 1024 },
-      includeAssets: ['icon.svg'],
+      includeAssets: ['icon.svg', 'violin/*.mp3'],
       manifest: {
         name: '바이올린 연습 도우미',
         short_name: '바이올린',
