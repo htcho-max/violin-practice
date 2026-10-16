@@ -1,0 +1,32 @@
+{
+  "name": "violin-practice",
+  "private": true,
+  "version": "0.2.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "phone": "vite --host --mode phone",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview --host",
+    "test": "vitest run",
+    "smoke": "node scripts/make-test-wav.mjs && npm run build && node scripts/smoke.mjs"
+  },
+  "dependencies": {
+    "dexie": "4.0.8",
+    "pitchy": "4.1.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "18.3.12",
+    "@types/react-dom": "18.3.1",
+    "@vitejs/plugin-basic-ssl": "^1.1.0",
+    "@vitejs/plugin-react": "4.3.3",
+    "fake-indexeddb": "6.0.0",
+    "playwright": "^1.56.1",
+    "typescript": "5.6.3",
+    "vite": "5.4.10",
+    "vite-plugin-pwa": "0.20.5",
+    "vitest": "2.1.4"
+  }
+}
