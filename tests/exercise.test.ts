@@ -53,3 +53,14 @@ describe('활 연습 (세브치크식)', () => {
     });
   }
 });
+
+import { guessFolder } from '../src/data/folders';
+describe('악보 폴더 짐작', () => {
+  it('연결한 곡의 권', () => expect(guessFolder('아무 제목', 3)).toBe('suzuki-3'));
+  it('제목의 작곡가 (4권)', () => {
+    expect(guessFolder('협주곡 5번 D장조 1악장 (자이츠)')).toBe('suzuki-4');
+    expect(guessFolder('협주곡 A단조 1악장 (비발디)')).toBe('suzuki-4');
+  });
+  it('1~3권 곡 제목', () => expect(guessFolder('유모레스크 (드보르자크) 연습', undefined, new Map([[3, ['유모레스크 (드보르자크)']]]))).toBe('suzuki-3'));
+  it('그 밖의 곡', () => expect(guessFolder('Carol of the Bells')).toBe('other'));
+});

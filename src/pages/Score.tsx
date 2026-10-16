@@ -17,6 +17,7 @@ import { useWakeLock } from '../state/wakeLock';
 import { Exercises, createExercise, createBow, loadOpts, recordProgress } from './Exercises';
 import { BOW_VARIANTS } from '../exercise/bow';
 import { STEPS } from '../exercise/curriculum';
+import { useFolders, guessFolder, folderForBook, addFolder, renameFolder, deleteFolder, moveFolder, moveScore } from '../data/folders';
 
 function useScores(): ScoreFile[] {
   const [rows, setRows] = useState<ScoreFile[]>([]);
@@ -35,12 +36,17 @@ const tone = (c: number | null) => (c === null ? '' : c <= 10 ? 'good' : c <= 20
 export function Score() {
   const scores = useScores();
   const pieces = usePieces();
+  const folders = useFolders();
   const [openId, setOpenId] = useState<number | null>(null);
   const [exView, setExView] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pieceForNew, setPieceForNew] = useState('');
+  const [filter, setFilter] = useState<string>(() => { try { return localStorage.getItem('violin-score-folder') || 'all'; } catch { return 'all'; } });
+  const [manage, setManage] = useState(false);
+  useEffect(() => { try { localStorage.setItem('violin-score-folder', filter); } catch { /* 무시 */ } }, [filter]);
   const file = useRef<HTMLInputElement>(null);
   const open = scores.find((s) => s.id === openId) ?? null;
+  const folderName = (id?: string) => folders.find((f) => f.id === id)?.name ?? '분류 안 됨';
 
   async function importFile(f: File) {
     setError(null);
@@ -49,7 +55,13 @@ export function Score() {
       const xml = await f.text();
       const parsed = parseMusicXML(xml);
       if (!parsed.notes.length) throw new Error('음표가 없는 악보예요.');
-      const id = await db.scores.add({ title: parsed.title, xml, pieceId: pieceForNew || undefined, createdAt: Date.now() });
+      const piece = pieces.find((p) => p.id === pieceForNew);
+      // 폴더: 고른 폴더 > 연결한 곡의 권 > 제목으로 짐작
+      const folder = filter !== 'all' && filter !== 'none' ? filter
+        : piece ? await folderForBook(piece.book)
+        : guessFolder(parsed.title, undefined, new Map([3, 2, 1].map((b) => [b, pieces.filter((p) => p.book === b).map((p) => p.title)])));
+      if (folder.startsWith('suzuki-')) await folderForBook(Number(folder.split('-')[1]));
+      const id = await db.scores.add({ title: parsed.title, xml, pieceId: pieceForNew || undefined, folder, createdAt: Date.now() });
       setOpenId(id);
     } catch (e) {
       setError((e as Error).message || '악보를 불러오지 못했어요.');
@@ -61,19 +73,83 @@ export function Score() {
   if (open) return <ScoreView key={`${open.id}:${open.createdAt}`} score={open} onClose={() => { setOpenId(null); setExView(!!open.exercise); }} />;
   if (exView) return <Exercises onOpen={(id) => { setOpenId(id); }} onBack={() => setExView(false)} />;
   const mine = scores.filter((s) => !s.exercise);
+  const known = new Set(folders.map((f) => f.id));
+  const inFolder = (id: string | 'none') => mine.filter((s) => (id === 'none' ? !s.folder || !known.has(s.folder) : s.folder === id));
+  const unsorted = inFolder('none');
+  const groups: { id: string; name: string; list: ScoreFile[] }[] = filter === 'all'
+    ? [...folders.map((f) => ({ id: f.id, name: f.name, list: inFolder(f.id) })).filter((g) => g.list.length > 0), ...(unsorted.length ? [{ id: 'none', name: '분류 안 됨', list: unsorted }] : [])]
+    : [{ id: filter, name: filter === 'none' ? '분류 안 됨' : folderName(filter), list: inFolder(filter) }];
+  const current = folders.find((f) => f.id === filter);
+
+  async function newFolder() {
+    const name = prompt('새 폴더 이름', '');
+    if (name?.trim()) setFilter(await addFolder(name));
+  }
 
   return (
     <section className="page score">
       <div className="card">
         <b>음계 · 포지션 · 에튀드</b>
-        <p className="hint">1포지션 음계에서 3포지션, 포지션 이동, 에튀드까지 단계별 연습곡을 앱이 만들어 줘요.</p>
+        <p className="hint">1포지션 음계에서 3포지션, 포지션 이동, 에튀드, 세브치크식 활 연습까지 앱이 연습곡을 만들어 줘요.</p>
         <button className="primary wide" onClick={() => setExView(true)} data-testid="open-exercises">연습곡 만들기</button>
       </div>
+
       <div className="card">
-        <b>악보 불러오기</b>
+        <div className="card-head">
+          <b>내 악보 {mine.length}개</b>
+          <button className="mini" onClick={() => setManage((m) => !m)} data-testid="folder-manage">{manage ? '완료' : '폴더 관리'}</button>
+        </div>
+        <div className="chips" data-testid="folder-chips">
+          <button className={`chip ${filter === 'all' ? 'on' : ''}`} onClick={() => setFilter('all')}>전체 {mine.length}</button>
+          {folders.map((f) => (
+            <button key={f.id} className={`chip ${filter === f.id ? 'on' : ''}`} onClick={() => setFilter(f.id)}>{f.name} {inFolder(f.id).length}</button>
+          ))}
+          {unsorted.length > 0 && <button className={`chip ${filter === 'none' ? 'on' : ''}`} onClick={() => setFilter('none')}>분류 안 됨 {unsorted.length}</button>}
+        </div>
+        {manage && (
+          <div className="folder-manage">
+            <button className="secondary wide" onClick={newFolder} data-testid="folder-add">+ 새 폴더</button>
+            {current ? (
+              <div className="session-controls">
+                <button onClick={async () => { const n = prompt('폴더 이름', current.name); if (n?.trim()) renameFolder(current.id, n); }}>이름 바꾸기</button>
+                <button onClick={() => moveFolder(current.id, -1)} aria-label="앞으로">◀</button>
+                <button onClick={() => moveFolder(current.id, 1)} aria-label="뒤로">▶</button>
+                <button className="danger" onClick={() => { if (confirm(`"${current.name}" 폴더를 지울까요? 안의 악보는 지우지 않고 "분류 안 됨"으로 옮겨요.`)) { deleteFolder(current.id); setFilter('all'); } }}>폴더 지우기</button>
+              </div>
+            ) : <p className="hint">폴더를 하나 고르면 이름 바꾸기·순서·지우기를 할 수 있어요.</p>}
+          </div>
+        )}
+        {filter === 'all' && mine.length === 0 && <p className="muted small">아직 없어요.</p>}
+        {groups.map((g) => (
+          <div key={g.id} className="folder-group" data-testid={`folder-${g.id}`}>
+            {filter === 'all' && <div className="folder-title">{g.name} <span className="muted small">{g.list.length}</span></div>}
+            {g.list.length === 0 && <p className="muted small">이 폴더에는 아직 악보가 없어요. 아래에서 불러오면 이 폴더에 들어가요.</p>}
+            <ul className="rec-list">
+              {g.list.map((s) => (
+                <li key={s.id}>
+                  <div className="rec-head">
+                    <button className="link rec-title" onClick={() => setOpenId(s.id!)} data-testid="score-open">
+                      <b>{s.title}</b>
+                      <span className="muted small">{pieces.find((p) => p.id === s.pieceId)?.title ?? '곡 연결 없음'} · {new Date(s.createdAt).toLocaleDateString('ko-KR')}</span>
+                    </button>
+                    <select className="mini-select" value={s.folder && known.has(s.folder) ? s.folder : ''} onChange={(e) => moveScore(s.id!, e.target.value || undefined)} aria-label="폴더 옮기기" data-testid="score-folder">
+                      <option value="">분류 안 됨</option>
+                      {folders.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+                    </select>
+                    <button className="mini danger" onClick={() => { if (confirm('이 악보를 지울까요?')) db.scores.delete(s.id!); }} aria-label="악보 삭제">✕</button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+
+      <div className="card">
+        <b>악보 불러오기{filter !== 'all' && filter !== 'none' ? ` → ${folderName(filter)}` : ''}</b>
         <p className="hint">
           MusicXML 파일(.musicxml, .xml)을 고르세요. 악보는 <b>이 기기 안에만</b> 저장되고, 앱이나 GitHub에는 올라가지 않아요.
-          (교재 악보는 저작권이 있어서 개인 연습용으로만 쓰세요.)
+          (교재 악보는 저작권이 있어서 개인 연습용으로만 쓰세요.) 폴더를 골라 두면 그 폴더에 들어가고, 전체일 때는 연결한 곡의 권이나 제목으로 나눠 넣어요.
         </p>
         <select value={pieceForNew} onChange={(e) => setPieceForNew(e.target.value)} aria-label="연결할 곡">
           <option value="">곡 연결 안 함</option>
@@ -83,24 +159,6 @@ export function Score() {
           onChange={(e) => e.target.files?.[0] && importFile(e.target.files[0])} data-testid="score-file" />
         <button className="primary wide" onClick={() => file.current?.click()}>파일에서 악보 불러오기</button>
         {error && <p className="error">{error}</p>}
-      </div>
-
-      <div className="card">
-        <b>내 악보 {mine.length}개</b>
-        {mine.length === 0 && <p className="muted small">아직 없어요.</p>}
-        <ul className="rec-list">
-          {mine.map((s) => (
-            <li key={s.id}>
-              <div className="rec-head">
-                <button className="link rec-title" onClick={() => setOpenId(s.id!)} data-testid="score-open">
-                  <b>{s.title}</b>
-                  <span className="muted small">{pieces.find((p) => p.id === s.pieceId)?.title ?? '곡 연결 없음'} · {new Date(s.createdAt).toLocaleDateString('ko-KR')}</span>
-                </button>
-                <button className="mini danger" onClick={() => { if (confirm('이 악보를 지울까요?')) db.scores.delete(s.id!); }} aria-label="악보 삭제">✕</button>
-              </div>
-            </li>
-          ))}
-        </ul>
       </div>
     </section>
   );

@@ -59,6 +59,8 @@ export interface ScoreFile {
   createdAt: number;
   lastFrom?: number;
   lastTo?: number;
+  /** 폴더 id (없으면 분류 안 됨) */
+  folder?: string;
   /** 앱이 만든 연습곡 (음계·포지션·에튀드) */
   exercise?: ExerciseMeta;
 }

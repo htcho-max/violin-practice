@@ -214,3 +214,7 @@ details.card > summary.card-summary > .muted { margin-right: auto; font-size: 14
 .measure-chip small { font-size: 11px; }
 .measure-chip.good { border-color: var(--good); } .measure-chip.warn { border-color: var(--warn); } .measure-chip.bad { border-color: var(--bad); }
 .score-sheet .now-note path, .score-sheet .now-note ellipse { fill: #e11d48 !important; stroke: #e11d48 !important; }
+.folder-group { margin-top: 10px; }
+.folder-title { font-weight: 700; margin: 6px 0 2px; }
+.folder-manage { display: flex; flex-direction: column; gap: 8px; margin: 8px 0; }
+.mini-select { max-width: 92px; font-size: 12px; padding: 4px; }

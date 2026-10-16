@@ -218,6 +218,25 @@ try {
     await page.getByRole('button', { name: '◀ 목록' }).click();
     await page.getByRole('button', { name: '◀ 목록' }).click();
     ok(/내 악보 0개/.test(await page.locator('.page').textContent()), '연습곡은 내 악보 목록과 따로');
+    // 악보 폴더
+    const chips = await page.getByTestId('folder-chips').textContent();
+    ok(/스즈키 4권/.test(chips) && /스즈키 3권/.test(chips) && /기타 곡/.test(chips), `기본 폴더 3개 (${chips})`);
+    await page.getByTestId('score-file').setInputFiles(path.resolve('scripts/test-score.musicxml'));
+    await page.waitForTimeout(1200);
+    await page.getByRole('button', { name: '◀ 목록' }).click();
+    ok(/스모크 테스트 음계/.test(await page.getByTestId('folder-other').textContent()), '제목으로 짐작해 기타 곡 폴더에');
+    page.once('dialog', (d) => d.accept('연습용'));
+    await page.getByTestId('folder-manage').click();
+    await page.getByTestId('folder-add').click();
+    await page.waitForTimeout(500);
+    ok(/연습용 0/.test(await page.getByTestId('folder-chips').textContent()), '새 폴더 만들기 (선택됨)');
+    await page.getByRole('button', { name: /^전체/ }).click();
+    const fid = await page.getByTestId('score-folder').first().evaluate((el) => [...el.options].find((o) => o.text === '연습용').value);
+    await page.getByTestId('score-folder').first().selectOption(fid);
+    await page.waitForTimeout(500);
+    const chips2 = await page.getByTestId('folder-chips').textContent();
+    ok(/연습용 1/.test(chips2) && /기타 곡 0/.test(chips2), `악보를 다른 폴더로 옮기기 (${chips2})`);
+    await page.screenshot({ path: 'scripts/shot-folders.png', fullPage: true });
     ok(errors.length === 0, `콘솔 오류 없음 ${errors.join(' | ')}`);
     await browser.close();
   }
