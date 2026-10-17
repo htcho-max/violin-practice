@@ -77,13 +77,13 @@ try {
     await page.getByTestId('session-save').click();
     await page.waitForTimeout(400);
     await tab(page, '기록');
-    await page.getByRole('button', { name: '연습 기록' }).click();
+    await page.locator('.log .segmented').getByRole('button', { name: '연습 기록' }).click();
     await page.screenshot({ path: 'scripts/shot-log.png', fullPage: true });
     ok((await page.getByText('스모크 테스트').count()) >= 1, `세션 메모 저장 (${await page.getByText('스모크 테스트').count()})`);
     ok(await page.getByText(/곡 구간 연습 · 자이츠/).isVisible(), '세션에 곡 이름 기록');
 
     // 녹음 2개 → 비교
-    await page.getByRole('button', { name: '녹음', exact: true }).click();
+    await page.locator('.log .segmented').first().getByRole('button', { name: '녹음' }).click();
     for (let i = 0; i < 2; i++) {
       await page.getByTestId('rec-toggle').click();
       await page.waitForTimeout(2500);
@@ -144,6 +144,8 @@ try {
     const pct = Number(res.match(/(\d+)%/)?.[1]);
     ok(pct >= 80, `채점 결과 맞은 음 ${pct}% (${res.match(/맞은 음 \d+\/\d+/)?.[0]})`);
     ok(/B4\+1[0-4]/.test(res), 'B4 +12센트를 가장 벗어난 음으로 표시');
+    ok(/녹음/.test(await page.getByTestId('run-saved').textContent().catch(() => '')), '채점하면 연습 기록과 녹음 저장');
+    ok(/연습 기록 1번/.test(await page.getByTestId('run-history').textContent().catch(() => '')), '이 악보 연습 기록 표시');
     const colored = await page.locator('[data-testid=osmd] svg path[fill="#ca8a04"], [data-testid=osmd] svg path[fill="#15803d"], [data-testid=osmd] svg [fill="#ca8a04"], [data-testid=osmd] svg [fill="#15803d"]').count();
     ok(colored > 0, `음표 머리 색칠 (${colored})`);
     ok(await seen(page.getByTestId('rhythm-stats')), `박자 채점 표시 (${(await page.getByTestId('rhythm-stats').textContent().catch(() => '')).trim()})`);
@@ -180,6 +182,18 @@ try {
     const order = await page.evaluate(() => { const a = document.querySelector('[data-testid=play-card]'), b = document.querySelector('.score-sheet'); return !!(a && b && (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING)); });
     ok(order, '메뉴가 악보 위에 있음');
     await page.screenshot({ path: 'scripts/shot-layout.png', fullPage: true });
+    // 연습 기록 탭: 오늘 악보 연습 + 녹음 연동
+    await page.getByTestId('play-toggle').click().catch(() => {});
+    await tab(page, '기록');
+    await page.locator('.log .segmented').getByRole('button', { name: '연습 기록' }).click();
+    ok(await seen(page.getByTestId('day-runs')), '달력 오늘 칸에 악보 연습 기록');
+    await page.getByTestId('day-runs').locator('.rec-title').first().click();
+    ok(await seen(page.getByTestId('day-runs').locator('audio')), '연습 기록에서 녹음 재생');
+    await page.screenshot({ path: 'scripts/shot-runs.png', fullPage: true });
+    await page.locator('.log .segmented').first().getByRole('button', { name: '녹음' }).click();
+    await page.getByTestId('rec-filter').getByRole('button', { name: '악보 연습' }).click();
+    await page.locator('.rec-list .rec-title').first().click();
+    ok(/악보 채점: 1~2마디/.test(await page.getByTestId('rec-run').textContent().catch(() => '')), '녹음 목록에 악보 채점 결과 연동');
     ok(errors.length === 0, `콘솔 오류 없음 ${errors.join(' | ')}`);
     await browser.close();
   }

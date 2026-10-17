@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { liveQuery } from 'dexie';
-import { db, type Recording } from '../data/db';
+import { db, type Recording, type ScoreRun } from '../data/db';
+import { runText } from '../state/useScoreRuns';
 import { recorder, trackStats } from '../audio/recorder';
 import { CentsTrace } from '../components/CentsTrace';
 import { usePieces } from '../state/usePieces';
@@ -8,6 +9,15 @@ import { useSettings } from '../state/settings';
 import { useWakeLock } from '../state/wakeLock';
 import { clock, localDate } from '../data/dates';
 import { pitchTracker } from '../audio/pitchTracker';
+
+function useRunMap(): Map<number, ScoreRun> {
+  const [m, setM] = useState<Map<number, ScoreRun>>(new Map());
+  useEffect(() => {
+    const sub = liveQuery(() => db.scoreRuns.toArray()).subscribe({ next: (rs) => setM(new Map(rs.map((r) => [r.id!, r]))), error: () => {} });
+    return () => sub.unsubscribe();
+  }, []);
+  return m;
+}
 
 function useRecordings(): Recording[] {
   const [rows, setRows] = useState<Recording[]>([]);
@@ -24,6 +34,15 @@ function Player({ rec }: { rec: Recording }) {
   return <audio controls src={url} preload="metadata" className="player" />;
 }
 
+/** id 로 녹음을 불러와 재생 (연습 기록에서) */
+export function RecPlayerById({ id }: { id: number }) {
+  const [rec, setRec] = useState<Recording | null | undefined>(undefined);
+  useEffect(() => { db.recordings.get(id).then((r) => setRec(r ?? null)); }, [id]);
+  if (rec === undefined) return null;
+  if (rec === null) return <p className="muted small">녹음이 지워졌어요.</p>;
+  return <><div className="muted small">{stat(rec)}</div><Player rec={rec} /></>;
+}
+
 function stat(rec: Recording) {
   const s = trackStats(rec.track);
   return s.meanAbs === null ? '음정 기록 없음' : `평균 ±${Math.round(s.meanAbs)}센트 · ±10센트 안 ${Math.round((s.within10 ?? 0) * 100)}%`;
@@ -37,6 +56,9 @@ function RecTrace({ rec, seconds }: { rec: Recording; seconds: number }) {
 export function Recordings() {
   const { settings } = useSettings();
   const recs = useRecordings();
+  const runMap = useRunMap();
+  const [filter, setFilter] = useState<'all' | 'score' | 'free'>('all');
+  const shown = recs.filter((r) => filter === 'all' || (filter === 'score' ? !!r.scoreId : !r.scoreId));
   const pieces = usePieces();
   const [pieceId, setPieceId] = useState('');
   const [busy, setBusy] = useState(false);
@@ -128,20 +150,26 @@ export function Recordings() {
 
       <div className="card">
         <b>녹음 {recs.length}개</b>
-        {recs.length === 0 && <p className="muted small">아직 녹음이 없어요.</p>}
+        <div className="segmented small" data-testid="rec-filter">
+          <button className={filter === 'all' ? 'on' : ''} onClick={() => setFilter('all')}>전체</button>
+          <button className={filter === 'score' ? 'on' : ''} onClick={() => setFilter('score')}>악보 연습</button>
+          <button className={filter === 'free' ? 'on' : ''} onClick={() => setFilter('free')}>자유 녹음</button>
+        </div>
+        {shown.length === 0 && <p className="muted small">아직 녹음이 없어요.</p>}
         <ul className="rec-list">
-          {recs.map((r) => (
+          {shown.map((r) => (
             <li key={r.id}>
               <div className="rec-head">
                 <label className="rec-check"><input type="checkbox" checked={compare.includes(r.id!)} onChange={() => toggleCompare(r.id!)} aria-label="비교에 넣기" /></label>
                 <button className="link rec-title" onClick={() => setOpen(open === r.id ? null : r.id!)}>
                   <b>{r.title}</b>
-                  <span className="muted small">{new Date(r.createdAt).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })} · {clock(r.durationSec)}</span>
+                  <span className="muted small">{r.scoreId ? '악보 · ' : ''}{new Date(r.createdAt).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })} · {clock(r.durationSec)}</span>
                 </button>
                 <button className="mini danger" onClick={() => { if (confirm('이 녹음을 지울까요?')) db.recordings.delete(r.id!); }} aria-label="녹음 삭제">✕</button>
               </div>
               {open === r.id && (
                 <div className="rec-body">
+                  {r.runId && runMap.get(r.runId) && <div className="small" data-testid="rec-run">악보 채점: {runText(runMap.get(r.runId)!)}</div>}
                   <div className="muted small">{stat(r)}</div>
                   <RecTrace rec={r} seconds={Math.max(1, r.durationSec)} />
                   <Player rec={r} />

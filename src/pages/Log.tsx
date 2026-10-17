@@ -4,7 +4,9 @@ import { usePieces } from '../state/usePieces';
 import { db } from '../data/db';
 import { addDays, formatDuration, localDate, streak } from '../data/dates';
 import { Pieces } from './Pieces';
-import { Recordings } from './Recordings';
+import { Recordings, RecPlayerById } from './Recordings';
+import { useScoreRuns, runText } from '../state/useScoreRuns';
+import { clock } from '../data/dates';
 
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
 
@@ -37,6 +39,8 @@ export function Log() {
 
 function Calendar() {
   const sessions = useSessions();
+  const runs = useScoreRuns();
+  const [openRun, setOpenRun] = useState<number | null>(null);
   const pieces = usePieces();
   const pieceName = (id: string) => pieces.find((p) => p.id === id)?.title;
   const today = localDate();
@@ -46,8 +50,10 @@ function Calendar() {
   const byDate = useMemo(() => {
     const m = new Map<string, number>();
     sessions.forEach((s) => m.set(s.date, (m.get(s.date) ?? 0) + s.totalSec));
+    // 세션 밖에서 한 악보 연습도 연습 시간에 넣기
+    runs.forEach((r) => { if (!r.inSession) m.set(r.date, (m.get(r.date) ?? 0) + r.durationSec); });
     return m;
-  }, [sessions]);
+  }, [sessions, runs]);
 
   const [y, mo] = month.split('-').map(Number);
   const first = new Date(y, mo - 1, 1);
@@ -71,6 +77,7 @@ function Calendar() {
     setMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
   };
   const daySessions = sessions.filter((s) => s.date === selected);
+  const dayRuns = runs.filter((r) => r.date === selected);
 
   return (
     <div className="page-sub">
@@ -99,7 +106,7 @@ function Calendar() {
 
       <div className="card">
         <b>{Number(selected.slice(5, 7))}월 {Number(selected.slice(8))}일</b>
-        {daySessions.length === 0 && <p className="muted">기록이 없어요.</p>}
+        {daySessions.length === 0 && dayRuns.length === 0 && <p className="muted">기록이 없어요.</p>}
         {daySessions.map((s) => (
           <div key={s.id} className="session-row">
             <div className="session-row-head">
@@ -110,6 +117,30 @@ function Calendar() {
             {s.memo && <p className="memo">{s.memo}</p>}
           </div>
         ))}
+        {dayRuns.length > 0 && (
+          <div className="session-row" data-testid="day-runs">
+            <div className="session-row-head"><span><b>악보 연습 {dayRuns.length}번</b> <span className="muted">{formatDuration(dayRuns.reduce((a, r) => a + r.durationSec, 0))}</span></span></div>
+            <ul className="rec-list">
+              {[...dayRuns].reverse().map((r) => (
+                <li key={r.id}>
+                  <div className="rec-head">
+                    <button className="link rec-title" onClick={() => setOpenRun(openRun === r.id ? null : r.id!)}>
+                      <b>{r.title}</b>
+                      <span className="muted small">{new Date(r.createdAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })} · {clock(r.durationSec)} · {runText(r)}{r.recordingId ? ' · 녹음' : ''}</span>
+                    </button>
+                    <button className="mini danger" onClick={() => { if (confirm('이 악보 연습 기록을 지울까요? (녹음은 녹음 목록에 남아요)')) db.scoreRuns.delete(r.id!); }} aria-label="악보 연습 기록 삭제">✕</button>
+                  </div>
+                  {openRun === r.id && (
+                    <div className="rec-body">
+                      {r.weakMeasures?.length ? <p className="small">가장 벗어난 마디: {r.weakMeasures.join(', ')}</p> : null}
+                      {r.recordingId ? <RecPlayerById id={r.recordingId} /> : <p className="muted small">녹음 없이 채점만 했어요.</p>}
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </div>
     </div>
   );

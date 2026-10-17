@@ -15,6 +15,11 @@ import { usePieces } from '../state/usePieces';
 import { usePitch } from '../state/usePitch';
 import { useSettings } from '../state/settings';
 import { useWakeLock } from '../state/wakeLock';
+import { useSession } from '../state/session';
+import { recorder } from '../audio/recorder';
+import { localDate, clock } from '../data/dates';
+import { useScoreRuns, runText } from '../state/useScoreRuns';
+import type { ScoreRun, Recording } from '../data/db';
 import { Exercises, createExercise, createBow, loadOpts, recordProgress, takePending } from './Exercises';
 import { BOW_VARIANTS } from '../exercise/bow';
 import { STEPS } from '../exercise/curriculum';
@@ -227,6 +232,12 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
   loopRef.current = loop;
   useWakeLock(listening || playing, settings.wakeLock);
   const ex = score.exercise;
+  const { session } = useSession();
+  const runs = useScoreRuns(score.id);
+  const runStart = useRef(0);
+  const [saved, setSaved] = useState<string | null>(null);
+  const [recOn, setRecOn] = useState(() => { try { return localStorage.getItem('violin-score-rec') !== '0'; } catch { return true; } });
+  useEffect(() => { try { localStorage.setItem('violin-score-rec', recOn ? '1' : '0'); } catch { /* 무시 */ } }, [recOn]);
   const step = ex ? STEPS.find((s) => s.id === ex.stepId) : undefined;
   const [passMsg, setPassMsg] = useState<string | null>(null);
   const [regenBusy, setRegenBusy] = useState(false);
@@ -345,8 +356,11 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
   async function start() {
     if (playing) stopPlay();
     setResult(null);
+    setSaved(null);
     played.current = [];
     if (!pitch.on) await pitch.start();
+    runStart.current = Date.now();
+    if (recOn) { try { await recorder.start(settings.a4); } catch { /* 녹음 못 해도 채점은 계속 */ } }
     setListening(true);
     if (hasAcc && scoreWithAcc) { curIdx.current = 0; playRange(undefined, { keepListening: true, muteMine: true }); }
   }
@@ -354,9 +368,35 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
     if (playingRef.current) stopPlay();
     setListening(false);
     // flush 는 effect 정리에서 → 다음 틱에 채점
-    setTimeout(() => {
+    const recP = recorder.recording ? recorder.stop() : Promise.resolve(null);
+    const durationSec = (Date.now() - runStart.current) / 1000;
+    setTimeout(async () => {
       const r = alignNotes(expected, played.current);
       setResult(r);
+      // 연습 기록 + 녹음 저장
+      const rec = await recP;
+      const sm = summarizeScore(r);
+      const played_ = r.filter((x) => x.status !== 'missed').length;
+      if (played_ >= 2 && durationSec >= 2) {
+        const rh = analyzeRhythm(parsed, r);
+        const weak = [...sm.byMeasure.entries()].filter(([, v]) => v !== null).sort((a, b) => b[1]! - a[1]!).slice(0, 3).map(([m]) => m);
+        const run: ScoreRun = {
+          createdAt: Date.now(), date: localDate(), scoreId: score.id!, title: score.title, pieceId: score.pieceId, exerciseId: ex?.stepId,
+          from, to, durationSec, total: sm.total, ok: sm.ok, wrong: sm.wrong, missed: sm.missed, meanAbs: sm.meanAbs,
+          rhythmMs: rh?.meanAbsMs ?? null, bpm: rh ? Math.round(rh.bpm) : null, inSession: !!session, weakMeasures: weak,
+        };
+        const runId = await db.scoreRuns.add(run);
+        let recId: number | undefined;
+        if (rec && rec.durationSec >= 1) {
+          recId = await db.recordings.add({
+            createdAt: run.createdAt, date: run.date, pieceId: score.pieceId, title: `${score.title} · ${from}~${to}마디`,
+            durationSec: rec.durationSec, mime: rec.mime, blob: rec.blob, track: rec.track, scoreId: score.id!, runId,
+          } as Recording);
+          await db.scoreRuns.update(runId, { recordingId: recId });
+        }
+        if (score.pieceId) await db.pieces.update(score.pieceId, { lastPracticed: run.date });
+        setSaved(recId ? '연습 기록과 녹음을 저장했어요.' : '연습 기록을 저장했어요.');
+      }
       if (ex && from <= firstNoteMeasure && to >= last && r.length) {
         const sm = summarizeScore(r);
         const pct = Math.round((sm.ok / Math.max(1, sm.total)) * 100);
@@ -364,6 +404,8 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
       }
     }, 0);
   }
+  // 화면을 떠날 때 녹음 정리
+  useEffect(() => () => { if (recorder.recording) recorder.stop(); }, []);
   const stopRef = useRef(stop);
   stopRef.current = stop;
   const setRange = (a: number, b: number) => {
@@ -472,10 +514,13 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
           <button className="primary wide big" onClick={start} disabled={!expected.length} data-testid="score-start">● 이 구간 연주하고 채점받기</button>
         ) : (
           <>
-            <div className="rec-live"><span className="rec-dot" /> 듣는 중 · {liveDone}/{expected.length}음</div>
+            <div className="rec-live"><span className="rec-dot" /> {recorder.recording ? '녹음 · ' : ''}듣는 중 · {liveDone}/{expected.length}음</div>
             <div className="progress"><div style={{ width: `${(liveDone / Math.max(1, expected.length)) * 100}%` }} /></div>
             <button className="primary wide big stop" onClick={stop} data-testid="score-stop">■ 끝내고 채점</button>
           </>
+        )}
+        {!listening && (
+          <label className="small"><input type="checkbox" checked={recOn} onChange={(e) => setRecOn(e.target.checked)} data-testid="score-rec" /> 연주를 녹음해서 연습 기록 · 녹음에 함께 저장</label>
         )}
         {hasAcc && !listening && (
           <label className="small"><input type="checkbox" checked={scoreWithAcc} onChange={(e) => setScoreWithAcc(e.target.checked)} data-testid="score-with-acc" /> 반주를 틀고 같이 연주하며 채점 (이어폰을 쓰면 반주 소리가 섞이지 않아요)</label>
@@ -537,6 +582,7 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
             </div>
           )}
           {passMsg && <p className="good"><b>✓ {passMsg}</b></p>}
+          {saved && <p className="small muted" data-testid="run-saved">✓ {saved}</p>}
           {shiftRes.length > 0 && (
             <p className="small" data-testid="shift-stats">
               포지션 이동 음 {shiftOk.length}/{shiftRes.length}개 맞음{shiftMean !== null && <> · 평균 <b className={tone(shiftMean)}>±{Math.round(shiftMean)}센트</b></>}
@@ -585,6 +631,52 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
         </div>
       )}
 
+      <RunHistory runs={runs} onPick={(r) => setRange(r.from, r.to)} />
     </section>
+  );
+}
+
+
+function RecPlayer({ id }: { id: number }) {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let u: string | null = null;
+    db.recordings.get(id).then((r) => { if (r) { u = URL.createObjectURL(r.blob); setUrl(u); } });
+    return () => { if (u) URL.revokeObjectURL(u); };
+  }, [id]);
+  return url ? <audio controls src={url} preload="metadata" className="player" /> : <p className="muted small">녹음이 지워졌어요.</p>;
+}
+
+/** 이 악보의 연습 기록 (최근 순) */
+function RunHistory({ runs, onPick }: { runs: ScoreRun[]; onPick: (r: ScoreRun) => void }) {
+  const [open, setOpen] = useState<number | null>(null);
+  const [all, setAll] = useState(false);
+  if (!runs.length) return null;
+  const list = all ? runs : runs.slice(0, 5);
+  return (
+    <div className="card" data-testid="run-history">
+      <div className="card-head"><b>이 악보 연습 기록 {runs.length}번</b></div>
+      <ul className="rec-list">
+        {list.map((r) => (
+          <li key={r.id}>
+            <div className="rec-head">
+              <button className="link rec-title" onClick={() => setOpen(open === r.id ? null : r.id!)}>
+                <b>{runText(r)}</b>
+                <span className="muted small">{new Date(r.createdAt).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })} · {clock(r.durationSec)}{r.bpm ? ` · ♩≈${r.bpm}` : ''}{r.recordingId ? ' · 녹음 있음' : ''}</span>
+              </button>
+              <button className="mini" onClick={() => onPick(r)} title="이 구간으로">구간</button>
+              <button className="mini danger" onClick={() => { if (confirm('이 연습 기록을 지울까요? (녹음은 녹음 목록에 남아요)')) db.scoreRuns.delete(r.id!); }} aria-label="기록 삭제">✕</button>
+            </div>
+            {open === r.id && (
+              <div className="rec-body">
+                {r.weakMeasures?.length ? <p className="small">가장 벗어난 마디: {r.weakMeasures.join(', ')}</p> : null}
+                {r.recordingId ? <RecPlayer id={r.recordingId} /> : <p className="muted small">녹음 없이 채점만 했어요.</p>}
+              </div>
+            )}
+          </li>
+        ))}
+      </ul>
+      {runs.length > 5 && <button className="link small" onClick={() => setAll(!all)}>{all ? '접기' : `전체 ${runs.length}개 보기`}</button>}
+    </div>
   );
 }

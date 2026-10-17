@@ -47,6 +47,37 @@ export interface Recording {
   blob: Blob;
   /** [초, 센트(평균율 기준), midi] 를 0.05초 간격으로 */
   track: [number, number | null, number | null][];
+  /** 악보 채점과 함께 녹음한 경우 */
+  scoreId?: number;
+  runId?: number;
+}
+
+/** 악보 연습(채점) 한 번의 기록 */
+export interface ScoreRun {
+  id?: number;
+  createdAt: number;
+  date: string;
+  scoreId: number;
+  title: string;
+  pieceId?: string;
+  /** 연습곡이면 단계 id */
+  exerciseId?: string;
+  from: number;
+  to: number;
+  durationSec: number;
+  total: number;
+  ok: number;
+  wrong: number;
+  missed: number;
+  meanAbs: number | null;
+  /** 박자 오차(ms)와 내 템포 */
+  rhythmMs?: number | null;
+  bpm?: number | null;
+  /** 진행 중인 연습 세션 안에서 했는지 (그러면 시간은 세션에 이미 들어 있음) */
+  inSession: boolean;
+  recordingId?: number;
+  /** 가장 벗어난 마디 몇 개 */
+  weakMeasures?: number[];
 }
 export interface KV { key: string; value: unknown }
 
@@ -81,6 +112,7 @@ class PracticeDB extends Dexie {
   ladders!: Table<Ladder, number>;
   recordings!: Table<Recording, number>;
   scores!: Table<ScoreFile, number>;
+  scoreRuns!: Table<ScoreRun, number>;
   constructor() {
     super('violin-practice');
     this.version(1).stores({
@@ -93,6 +125,7 @@ class PracticeDB extends Dexie {
       recordings: '++id, createdAt, pieceId',
     });
     this.version(3).stores({ scores: '++id, createdAt, pieceId' });
+    this.version(4).stores({ scoreRuns: '++id, date, scoreId, createdAt' });
   }
 }
 

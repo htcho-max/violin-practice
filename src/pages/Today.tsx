@@ -10,6 +10,7 @@ import { currentPieces, pickReview, daysAgo } from '../data/pieces';
 import type { Piece } from '../data/db';
 import { useProgress, nextSuggestions, requestOpen, openStep, createBow, loadOpts } from './Exercises';
 import { STEPS } from '../exercise/curriculum';
+import { useScoreRuns } from '../state/useScoreRuns';
 
 function PieceChips({ list, selected, onPick }: { list: Piece[]; selected?: string; onPick: (id: string | null) => void }) {
   if (!list.length) return null;
@@ -41,8 +42,10 @@ export function Today({ go, openSettings }: { go: (t: TabId) => void; openSettin
   useEffect(() => { if (!session) { setMemo(''); setConfirmEnd(false); } }, [session]);
 
   const today = localDate();
-  const todaySec = sessions.filter((s) => s.date === today).reduce((a, s) => a + s.totalSec, 0);
-  const days = new Set(sessions.map((s) => s.date));
+  const runs = useScoreRuns();
+  const todaySec = sessions.filter((s) => s.date === today).reduce((a, s) => a + s.totalSec, 0)
+    + runs.filter((r) => r.date === today && !r.inSession).reduce((a, r) => a + r.durationSec, 0);
+  const days = new Set([...sessions.map((s) => s.date), ...runs.map((r) => r.date)]);
   const st = streak(days, today);
   const routineMin = settings.routine.reduce((a, r) => a + r.minutes, 0);
   const current = currentPieces(pieces);
