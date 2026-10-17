@@ -10,7 +10,7 @@ export const DEFAULT_FOLDERS: Folder[] = [
   { id: 'suzuki-3', name: '스즈키 3권' },
   { id: 'other', name: '기타 곡' },
 ];
-const BOOK4_WORDS = ['자이츠', 'seitz', '비발디', 'vivaldi', '두 대의', 'double'];
+const BOOK4_WORDS = ['자이츠', 'seitz', '비발디', 'vivaldi', '두 대의', 'double', '뵘', 'bohm', 'böhm'];
 
 /** 연결된 곡의 권수, 없으면 제목으로 짐작 */
 export function guessFolder(title: string, book?: number, titlesByBook?: Map<number, string[]>): string {

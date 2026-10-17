@@ -20,6 +20,7 @@ export const BOOK4_PIECES: Piece[] = [
   { ...mk(4, 4, '비발디 협주곡 A단조 1악장', 'Am'), id: 'b4-vivaldi-1' },
   { ...mk(4, 5, '비발디 협주곡 A단조 3악장', 'Am'), id: 'b4-vivaldi-3' },
   { ...mk(4, 6, '바흐 두 대의 바이올린을 위한 협주곡 1악장', 'Dm'), id: 'b4-bach-double-1' },
+  { ...mk(4, 7, '무궁동 (뵘)', 'D'), id: 'b4-bohm-perpetual' },
 ];
 
 /** 스즈키 1~3권 복습 곡 (판본마다 조금 다를 수 있어요 — 앱에서 고치거나 지울 수 있음) */

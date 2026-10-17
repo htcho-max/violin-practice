@@ -55,10 +55,10 @@ try {
     // 곡 목록 + 1~3권 불러오기 → 오늘의 복습 곡
     await tab(page, '기록');
     await page.getByRole('button', { name: '곡', exact: true }).click();
-    ok(await seen(page.getByRole('button', { name: '전체 6' })), '4권 곡 6개 기본 등록');
+    ok(await seen(page.getByRole('button', { name: '전체 7' })), '4권 곡 7개 기본 등록');
     await page.getByTestId('seed-old').click();
     await page.waitForTimeout(300);
-    ok(await seen(page.getByRole('button', { name: '전체 42' })), '1~3권 불러오기 → 42곡');
+    ok(await seen(page.getByRole('button', { name: '전체 43' })), '1~3권 불러오기 → 43곡');
     await page.screenshot({ path: 'scripts/shot-pieces.png' });
     await tab(page, '오늘');
     await seen(page.getByTestId('review-list'));
