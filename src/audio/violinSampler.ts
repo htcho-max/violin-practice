@@ -36,7 +36,7 @@ const ONSET = 0.02; // 샘플 앞의 무음
 
 /** 한 음 예약. 끝나는 노드를 돌려줌 */
 export function scheduleViolinNote(
-  ctx: BaseAudioContext, dest: AudioNode, midi: number, when: number, dur: number, a4 = 440, gain = 1,
+  ctx: BaseAudioContext, dest: AudioNode, midi: number, when: number, dur: number, a4 = 440, gain = 1, attack = 0.012,
 ): AudioBufferSourceNode | null {
   const s = pickSample(midi, a4);
   if (!s) return null;
@@ -47,7 +47,7 @@ export function scheduleViolinNote(
   const len = Math.max(0.06, dur);
   const rel = Math.min(0.12, len * 0.3);
   g.gain.setValueAtTime(0, when);
-  g.gain.linearRampToValueAtTime(gain, when + 0.012);
+  g.gain.linearRampToValueAtTime(gain, when + Math.min(attack, len * 0.5));
   g.gain.setValueAtTime(gain, when + len - rel * 0.3);
   g.gain.linearRampToValueAtTime(0, when + len + rel);
   src.connect(g).connect(dest);

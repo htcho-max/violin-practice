@@ -43,6 +43,70 @@ export function planPlayback(s: ParsedScore, o: PlanOptions, accParts: AccPart[]
   return { events, clicks, total: acc * q, acc: accEv };
 }
 
+/** 연주법에 따라 소리 내는 길이·어택·세기 (초 단위 길이 dur 기준) */
+export interface NoteShape { len: number; attack: number; gain: number; pizz: boolean }
+export function noteShape(e: PlayEvent): NoteShape {
+  const a = e.note.art ?? {};
+  const d = e.dur;
+  let len: number;
+  if (a.stacc && a.tenuto) len = d * 0.75; // 포르타토
+  else if (a.stacc) len = a.slurNext || a.slurIn ? Math.max(0.07, d * 0.55) : Math.max(0.06, Math.min(d * 0.45, 0.35)); // 같은 활 스타카토는 조금 길게
+  else if (a.slurNext) len = d + 0.04; // 이음줄: 다음 음과 살짝 겹쳐 끊김 없이
+  else if (a.tenuto) len = d * 0.98;
+  else len = d * 0.86; // 보통(데타셰): 활 바꾸는 틈
+  // 이음줄 안으로 들어오는 음은 새로 긋지 않으니 부드럽게
+  let attack = a.slurIn && !a.stacc ? 0.04 : 0.012;
+  let gain = a.slurIn && !a.accent ? 0.85 : 1;
+  if (a.accent) { gain = 1.35; attack = 0.005; }
+  return { len, attack, gain, pizz: !!a.pizz };
+}
+
+const pluckCache = new Map<string, AudioBuffer>();
+/** 피치카토: 카플러스-스트롱 줄 뜯는 소리 (음높이별로 한 번 만들어 둠) */
+function pluckBuffer(ctx: BaseAudioContext, f: number): AudioBuffer {
+  const key = `${ctx.sampleRate}:${Math.round(f * 10)}`;
+  const hit = pluckCache.get(key);
+  if (hit) return hit;
+  const sr = ctx.sampleRate, n = Math.floor(sr * 1.2);
+  const buf = ctx.createBuffer(1, n, sr);
+  const out = buf.getChannelData(0);
+  const period = sr / f;
+  const L = Math.max(2, Math.floor(period));
+  const frac = period - L;
+  const line = new Float32Array(L + 1);
+  for (let i = 0; i <= L; i++) line[i] = Math.random() * 2 - 1;
+  // 조금 부드럽게 (손가락으로 뜯는 소리)
+  for (let i = 1; i <= L; i++) line[i] = 0.5 * (line[i] + line[i - 1]);
+  let idx = 0, prev = 0;
+  const decay = 0.996;
+  for (let i = 0; i < n; i++) {
+    const j = (idx + 1) % (L + 1);
+    const v = line[idx] * (1 - frac) + line[j] * frac;
+    const y = decay * 0.5 * (v + prev);
+    prev = v;
+    out[i] = line[idx];
+    line[idx] = y;
+    idx = j;
+  }
+  // 크기 맞추기
+  let peak = 0; for (let i = 0; i < Math.min(n, 2000); i++) peak = Math.max(peak, Math.abs(out[i]));
+  if (peak > 0) for (let i = 0; i < n; i++) out[i] /= peak;
+  pluckCache.set(key, buf);
+  return buf;
+}
+function pluckNote(ctx: BaseAudioContext, out: AudioNode, f: number, a: number, dur: number, gain: number): AudioBufferSourceNode {
+  const src = ctx.createBufferSource();
+  src.buffer = pluckBuffer(ctx, f);
+  const g = ctx.createGain();
+  const len = Math.min(1.1, Math.max(0.25, dur));
+  g.gain.setValueAtTime(0.55 * gain, a);
+  g.gain.setTargetAtTime(0.0001, a + len * 0.8, 0.06);
+  src.connect(g).connect(out);
+  src.start(a);
+  src.stop(a + len + 0.3);
+  return src;
+}
+
 /** 바이올린 비슷한 소리로 재생. stop() 을 돌려줌 */
 export class ScorePlayer {
   private nodes: AudioScheduledSourceNode[] = [];
@@ -86,7 +150,9 @@ export class ScorePlayer {
       for (const e of plan.acc) {
         const a = t0 + e.time;
         if (e.inst === 'piano') { this.nodes.push(...pianoNote(ctx, accGain, midiToFreq(e.note.midi, opts.a4), a, e.dur)); continue; }
-        if (useSample) { const n = scheduleViolinNote(ctx, accGain, e.note.midi, a, e.dur * 0.98, opts.a4, 0.8); if (n) { this.nodes.push(n); continue; } }
+        const sh = noteShape(e);
+        if (sh.pizz) { this.nodes.push(pluckNote(ctx, accGain, midiToFreq(e.note.midi, opts.a4), a, e.dur, sh.gain)); continue; }
+        if (useSample) { const n = scheduleViolinNote(ctx, accGain, e.note.midi, a, sh.len, opts.a4, 0.8 * sh.gain, sh.attack); if (n) { this.nodes.push(n); continue; } }
         this.nodes.push(...pianoNote(ctx, accGain, midiToFreq(e.note.midi, opts.a4), a, e.dur));
       }
     }
@@ -95,9 +161,10 @@ export class ScorePlayer {
       const a0 = t0 + e.time;
       this.timers.push(setTimeout(() => opts.onNote?.(e, idx), Math.max(0, (a0 - ctx.currentTime + lat) * 1000)));
       if (opts.mute) continue;
+      const sh = noteShape(e);
+      if (sh.pizz) { this.nodes.push(pluckNote(ctx, master, midiToFreq(e.note.midi, opts.a4), a0, e.dur, sh.gain)); continue; }
       if (useSample) {
-        // 다음 음과 살짝 겹치게 (레가토)
-        const n = scheduleViolinNote(ctx, master, e.note.midi, a0, e.dur * 0.98, opts.a4, 0.9);
+        const n = scheduleViolinNote(ctx, master, e.note.midi, a0, sh.len, opts.a4, 0.9 * sh.gain, sh.attack);
         if (n) { this.nodes.push(n); continue; }
       }
       const osc = ctx.createOscillator();
@@ -117,10 +184,10 @@ export class ScorePlayer {
         this.nodes.push(lfo);
       }
       const g = ctx.createGain();
-      const a = t0 + e.time, len = Math.max(0.05, e.dur * 0.92);
+      const a = t0 + e.time, len = Math.max(0.05, sh.len);
       g.gain.setValueAtTime(0, a);
-      g.gain.linearRampToValueAtTime(1, a + Math.min(0.03, len / 3));
-      g.gain.setValueAtTime(0.85, a + len * 0.6);
+      g.gain.linearRampToValueAtTime(sh.gain, a + Math.min(Math.max(0.03, sh.attack), len / 3));
+      g.gain.setValueAtTime(0.85 * sh.gain, a + len * 0.6);
       g.gain.linearRampToValueAtTime(0, a + len);
       osc.connect(g).connect(lp);
       osc.start(a);

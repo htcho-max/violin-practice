@@ -1,5 +1,20 @@
 /** MusicXML(압축 안 된 .musicxml/.xml) → 마디별 음 목록. 첫 번째 파트, 화음은 가장 높은 음만 */
-export interface ScoreNote { measure: number; index: number; midi: number; beat: number; dur: number }
+/** 연주법: 재생할 때 소리 길이·어택을 다르게 (있을 때만 true) */
+export interface Articulation {
+  /** 스타카토(점) — 짧게 */
+  stacc?: boolean;
+  /** 악센트 — 세게 */
+  accent?: boolean;
+  /** 테누토 — 끝까지 */
+  tenuto?: boolean;
+  /** 다음 음과 이음줄로 이어짐 (활을 바꾸지 않음) */
+  slurNext?: boolean;
+  /** 앞 음에서 이음줄로 이어져 들어옴 (새로 긋지 않음) */
+  slurIn?: boolean;
+  /** 피치카토 */
+  pizz?: boolean;
+}
+export interface ScoreNote { measure: number; index: number; midi: number; beat: number; dur: number; art?: Articulation }
 export interface ParsedScore {
   title: string;
   measures: number[];
@@ -43,6 +58,31 @@ export function parseMusicXML(xml: string, opt: ParseOptions = {}): ParsedScore 
   const measureLen = new Map<number, number>();
   let time: [number, number] = [4, 4];
   let nominal = 4;
+  // 연주법 상태: 이음줄이 열려 있는지(성부별), 피치카토 구간인지
+  const slurOpen = new Map<string, number>();
+  let pizz = false;
+  const artOf = (el: Element, voice: string, chordTone: boolean): Articulation | undefined => {
+    const has = (tag: string) => el.getElementsByTagName(tag).length > 0;
+    const a: Articulation = {};
+    if (has('staccato') || has('staccatissimo') || has('spiccato')) a.stacc = true;
+    if (has('detached-legato')) { a.stacc = true; a.tenuto = true; }
+    if (has('accent') || has('strong-accent')) a.accent = true;
+    if (has('tenuto')) a.tenuto = true;
+    if (pizz || has('pizzicato')) a.pizz = true;
+    if (!chordTone) {
+      const open = slurOpen.get(voice) ?? 0;
+      if (open > 0) a.slurIn = true;
+      let n = open;
+      for (const sl of Array.from(el.getElementsByTagName('slur'))) {
+        const t = sl.getAttribute('type');
+        if (t === 'stop') n = Math.max(0, n - 1);
+      }
+      for (const sl of Array.from(el.getElementsByTagName('slur'))) if (sl.getAttribute('type') === 'start') n++;
+      slurOpen.set(voice, n);
+      if (n > 0) a.slurNext = true;
+    }
+    return Object.keys(a).length ? a : undefined;
+  };
   for (const m of Array.from(part.children).filter((c) => c.nodeName === 'measure')) {
     // 못갖춘마디 0 도 그대로 (0 을 거짓으로 보면 1번 마디와 겹침). 번호가 없거나 겹치면 앞 번호 + 1
     const raw = (m.getAttribute('number') ?? '').trim();
@@ -60,6 +100,11 @@ export function parseMusicXML(xml: string, opt: ParseOptions = {}): ParsedScore 
         if (b && bt) { if (measures.length === 1) time = [Number(b), Number(bt)]; nominal = (Number(b) * 4) / Number(bt); }
         continue;
       }
+      if (el.nodeName === 'direction') {
+        const w = Array.from(el.getElementsByTagName('words')).map((x) => x.textContent ?? '').join(' ');
+        if (/arco/i.test(w)) pizz = false; else if (/pizz/i.test(w)) pizz = true;
+        continue;
+      }
       if (el.nodeName === 'backup') { pos -= Number(text(el, 'duration')) / divisions; continue; }
       if (el.nodeName === 'forward') { pos += Number(text(el, 'duration')) / divisions; maxPos = Math.max(maxPos, pos); continue; }
       if (el.nodeName !== 'note') continue;
@@ -74,13 +119,14 @@ export function parseMusicXML(xml: string, opt: ParseOptions = {}): ParsedScore 
       const p = el.getElementsByTagName('pitch')[0];
       if (!p) continue;
       const midi = 12 * (Number(text(p, 'octave')) + 1) + STEP[text(p, 'step')] + Number(text(p, 'alter') || '0');
+      const art = artOf(el, voice, isChord);
       const ties = Array.from(el.getElementsByTagName('tie')).map((t) => t.getAttribute('type'));
       const tieStop = ties.includes('stop'), tieStart = ties.includes('start');
       if (all) {
         const key = `${voice}:${midi}`;
         const prevT = openTies.get(key);
         if (tieStop && prevT) { prevT.dur += dur; if (!tieStart) openTies.delete(key); continue; }
-        const nn: ScoreNote = { measure: num, index: 0, midi, beat: start, dur };
+        const nn: ScoreNote = { measure: num, index: 0, midi, beat: start, dur, ...(art ? { art } : {}) };
         notes.push(nn);
         if (tieStart) openTies.set(key, nn);
         continue;
@@ -98,6 +144,8 @@ export function parseMusicXML(xml: string, opt: ParseOptions = {}): ParsedScore 
       };
       if (!isChord && tieOpen && prev && groupStop()) {
         prev.dur += dur;
+        // 붙임줄로 이어진 뒤 음의 이음줄 정보는 합친 음이 이어받음
+        if (art?.slurNext) prev.art = { ...prev.art, slurNext: true }; else if (prev.art?.slurNext && !art?.slurNext) prev.art = { ...prev.art, slurNext: undefined };
         contAt = start;
         tieOpen = tieStart;
         continue;
@@ -107,7 +155,7 @@ export function parseMusicXML(xml: string, opt: ParseOptions = {}): ParsedScore 
         if (midi > prev.midi) prev.midi = midi; // 화음은 가장 높은 음으로 채점
         continue;
       }
-      notes.push({ measure: num, index: 0, midi, beat: start, dur });
+      notes.push({ measure: num, index: 0, midi, beat: start, dur, ...(art ? { art } : {}) });
     }
     const whole = Array.from(m.getElementsByTagName('rest')).some((r) => r.getAttribute('measure') === 'yes');
     measureLen.set(num, whole || maxPos === 0 ? nominal : m.getAttribute('implicit') === 'yes' ? maxPos : Math.max(maxPos, nominal));
