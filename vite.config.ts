@@ -18,10 +18,10 @@ export default defineConfig(({ mode }) => ({
     ...(mode === 'phone' ? [basicSsl()] : []),
     react(),
     VitePWA({
-      registerType: 'autoUpdate',
+      registerType: 'prompt', // 새 버전은 연습 중이 아닐 때 적용 (appUpdate.ts)
       // 악보 표시 라이브러리(약 1.5MB)도 오프라인에서 쓰도록 캐시
       workbox: { maximumFileSizeToCacheInBytes: 5 * 1024 * 1024 },
-      includeAssets: ['icon.svg', 'violin/*.mp3'],
+      includeAssets: ['icon.svg', 'icon-*.png', 'apple-touch-icon.png', 'violin/*.mp3'],
       manifest: {
         name: '바이올린 연습 도우미',
         short_name: '바이올린',
@@ -29,10 +29,13 @@ export default defineConfig(({ mode }) => ({
         theme_color: '#1f2937',
         background_color: '#111827',
         display: 'standalone',
-        orientation: 'portrait',
+        orientation: 'any', // 태블릿 가로(보면대)도
         lang: 'ko',
         icons: [
-          { src: 'icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any maskable' },
+          { src: 'icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' },
+          { src: 'icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+          { src: 'icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+          { src: 'icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
         ],
       },
     }),

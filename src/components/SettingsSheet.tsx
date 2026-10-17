@@ -1,26 +1,36 @@
 import { useSettings } from '../state/settings';
-import { db } from '../data/db';
 import { DEFAULT_ROUTINE } from '../data/settings';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { saveBackup, restoreBackup, storageInfo } from '../data/backup';
 import { checkForUpdate } from '../state/appUpdate';
+import { NumField } from './NumField';
 
 export function SettingsSheet({ onClose }: { onClose: () => void }) {
   const { settings, update } = useSettings();
   const [updateMsg, setUpdateMsg] = useState('');
 
-  async function exportData() {
-    const data = { exportedAt: new Date().toISOString(), settings, sessions: await db.sessions.toArray() };
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `violin-practice-${new Date().toISOString().slice(0, 10)}.json`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  const [busy, setBusy] = useState(false);
+  const [dataMsg, setDataMsg] = useState('');
+  const [info, setInfo] = useState<{ usedMB: number; persisted: boolean | null } | null>(null);
+  const file = useRef<HTMLInputElement>(null);
+  useEffect(() => { storageInfo().then(setInfo); }, []);
+  async function backup(withRec: boolean) {
+    setBusy(true); setDataMsg('');
+    try { await saveBackup(withRec); setDataMsg('백업 파일을 만들었어요.'); } catch { setDataMsg('백업 파일을 만들지 못했어요.'); } finally { setBusy(false); }
+  }
+  async function restore(f: File) {
+    if (!confirm('지금 이 기기의 기록을 백업 파일 내용으로 바꿀까요? (되돌릴 수 없어요)')) return;
+    setBusy(true); setDataMsg('');
+    try {
+      const { counts } = await restoreBackup(await f.text());
+      setDataMsg(`되돌렸어요: 연습 ${counts.sessions ?? 0}번, 악보 ${counts.scores ?? 0}개, 악보 연습 ${counts.scoreRuns ?? 0}번, 녹음 ${counts.recordings ?? '그대로'}${counts.recordings !== undefined ? '개' : ''}. 잠시 후 다시 불러와요.`);
+      setTimeout(() => location.reload(), 1500);
+    } catch (e) { setDataMsg((e as Error).message || '백업 파일을 읽지 못했어요.'); } finally { setBusy(false); if (file.current) file.current.value = ''; }
   }
 
   return (
     <div className="sheet-backdrop" onClick={onClose}>
-      <div className="sheet" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="설정">
+      <div className="sheet" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="설정">
         <div className="card-head"><b>설정</b><button className="mini" onClick={onClose}>닫기</button></div>
 
         <div className="row-setting">
@@ -42,15 +52,19 @@ export function SettingsSheet({ onClose }: { onClose: () => void }) {
         {settings.routine.map((r, i) => (
           <div key={r.key} className="row-setting">
             <input className="text" value={r.label} onChange={(e) => update({ routine: settings.routine.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)) })} aria-label="항목 이름" />
-            <input className="num" type="number" min={0} max={120} value={r.minutes} onChange={(e) => update({ routine: settings.routine.map((x, j) => (j === i ? { ...x, minutes: Math.max(0, Number(e.target.value)) } : x)) })} aria-label="분" />
+            <NumField value={r.minutes} min={0} max={120} label={`${r.label} 분`} width={48} onChange={(v) => update({ routine: settings.routine.map((x, j) => (j === i ? { ...x, minutes: v } : x)) })} />
             <span>분</span>
           </div>
         ))}
         <button className="secondary" onClick={() => update({ routine: DEFAULT_ROUTINE })}>기본 루틴으로 되돌리기</button>
 
         <h3>데이터</h3>
-        <p className="muted small">기록은 이 기기의 브라우저 안에만 저장돼요. 가끔 내보내 두세요.</p>
-        <button className="secondary" onClick={exportData}>기록 내보내기 (JSON)</button>
+        <p className="muted small">연습 기록·악보·녹음은 이 기기의 브라우저 안에만 저장돼요. 기기를 바꾸거나 브라우저 데이터를 지우기 전에 백업해 두세요.{info ? ` 지금 ${info.usedMB < 1 ? '1MB 미만' : `${Math.round(info.usedMB)}MB`} 사용 중.` : ''}{info?.persisted === false ? ' 브라우저가 공간이 부족할 때 지울 수 있는 상태예요. 홈 화면에 앱으로 설치하면 더 안전해요.' : ''}</p>
+        <button className="secondary" onClick={() => backup(false)} disabled={busy} data-testid="backup">백업 파일 만들기 (녹음 제외)</button>
+        <button className="secondary" onClick={() => backup(true)} disabled={busy}>백업 파일 만들기 (녹음 포함, 파일이 커요)</button>
+        <input ref={file} type="file" accept="application/json,.json" hidden onChange={(e) => e.target.files?.[0] && restore(e.target.files[0])} data-testid="restore-file" />
+        <button className="secondary" onClick={() => file.current?.click()} disabled={busy}>백업에서 되돌리기</button>
+        {dataMsg && <p className="muted small" data-testid="data-msg">{dataMsg}</p>}
 
         <h3>앱 정보</h3>
         <p className="muted small" data-testid="app-version">버전 {__APP_VERSION__}</p>
@@ -58,7 +72,7 @@ export function SettingsSheet({ onClose }: { onClose: () => void }) {
           setUpdateMsg('확인 중…');
           try {
             const r = await checkForUpdate();
-            setUpdateMsg(r === 'checked' ? '확인했어요. 새 버전이 있으면 잠시 후 자동으로 새로고침돼요.' : '이 환경에서는 업데이트 확인을 지원하지 않아요.');
+            setUpdateMsg(r === 'checked' ? '확인했어요. 새 버전이 있으면 연습 중이 아닐 때 자동으로 새로고침돼요.' : '이 환경에서는 업데이트 확인을 지원하지 않아요.');
           } catch { setUpdateMsg('인터넷 연결을 확인해 주세요.'); }
         }}>업데이트 확인</button>
         {updateMsg && <p className="muted small">{updateMsg}</p>}

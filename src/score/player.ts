@@ -52,17 +52,22 @@ export class ScorePlayer {
   usedSample = false;
   /** 첫 박(카운트인 포함 계획의 0초)의 AudioContext 시각 */
   startedAt = 0;
+  /** play/stop 할 때마다 증가: 샘플을 불러오는 동안 멈추거나 다시 누르면 앞의 재생은 취소 */
+  private gen = 0;
 
   async play(
     plan: Plan,
-    opts: { a4: number; click: boolean; volume?: number; voice?: Voice; onNote?: (e: PlayEvent | null) => void; onEnd?: () => void; mute?: boolean; accVolume?: number },
+    opts: { a4: number; click: boolean; volume?: number; voice?: Voice; onNote?: (e: PlayEvent | null, idx?: number) => void; onEnd?: () => void; mute?: boolean; accVolume?: number },
   ) {
     this.stop();
+    const gen = this.gen;
     const ctx = await resumeAudio();
+    if (gen !== this.gen) return;
     this.ctx = ctx;
-    this.playing = true;
     // 실제 바이올린 샘플 (못 불러오면 합성음으로)
     const useSample = (opts.voice ?? 'sample') === 'sample' && (await loadViolinSamples(ctx));
+    if (gen !== this.gen) return;
+    this.playing = true;
     this.usedSample = useSample;
     const t0 = ctx.currentTime + 0.15;
     const wave = stringWave(ctx);
@@ -85,9 +90,10 @@ export class ScorePlayer {
         this.nodes.push(...pianoNote(ctx, accGain, midiToFreq(e.note.midi, opts.a4), a, e.dur));
       }
     }
-    for (const e of plan.events) {
+    const lat = (ctx as AudioContext & { outputLatency?: number }).outputLatency ?? ctx.baseLatency ?? 0;
+    for (const [idx, e] of plan.events.entries()) {
       const a0 = t0 + e.time;
-      this.timers.push(setTimeout(() => opts.onNote?.(e), Math.max(0, (a0 - ctx.currentTime) * 1000)));
+      this.timers.push(setTimeout(() => opts.onNote?.(e, idx), Math.max(0, (a0 - ctx.currentTime + lat) * 1000)));
       if (opts.mute) continue;
       if (useSample) {
         // 다음 음과 살짝 겹치게 (레가토)
@@ -139,6 +145,7 @@ export class ScorePlayer {
   }
 
   stop() {
+    this.gen++;
     this.timers.forEach(clearTimeout);
     this.timers = [];
     const now = this.ctx?.currentTime ?? 0;

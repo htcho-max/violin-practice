@@ -1,3 +1,5 @@
+import { NumField } from '../components/NumField';
+import { DraftInput } from '../components/DraftInput';
 import { useState } from 'react';
 import { db, type Piece, type PieceStatus } from '../data/db';
 import { BOOK1_3_PIECES, STATUS_LABEL, STATUS_ORDER, daysAgo } from '../data/pieces';
@@ -26,17 +28,19 @@ function PieceRow({ p, today }: { p: Piece; today: string }) {
           </div>
           <div className="row-setting">
             <span>현재 ♩</span>
-            <input className="num" type="number" min={30} max={250} value={p.currentBpm ?? ''} onChange={(e) => updatePiece(p.id, { currentBpm: e.target.value ? Number(e.target.value) : undefined })} aria-label="현재 BPM" />
-            <span>목표 ♩</span>
-            <input className="num" type="number" min={30} max={250} value={p.targetBpm ?? ''} onChange={(e) => updatePiece(p.id, { targetBpm: e.target.value ? Number(e.target.value) : undefined })} aria-label="목표 BPM" />
+            <NumField value={p.currentBpm ?? 60} min={30} max={250} step={2} width={52} label="현재 BPM" onChange={(v) => updatePiece(p.id, { currentBpm: v })} />
           </div>
           <div className="row-setting">
-            <input className="text" value={p.title} onChange={(e) => updatePiece(p.id, { title: e.target.value })} aria-label="곡 이름" />
+            <span>목표 ♩</span>
+            <NumField value={p.targetBpm ?? 100} min={30} max={250} step={2} width={52} label="목표 BPM" onChange={(v) => updatePiece(p.id, { targetBpm: v })} />
+          </div>
+          <div className="row-setting">
+            <DraftInput className="text" value={p.title} onCommit={(v) => { if (v.trim()) updatePiece(p.id, { title: v.trim() }); }} label="곡 이름" />
             <select value={p.key} onChange={(e) => updatePiece(p.id, { key: e.target.value })} aria-label="조성">
               <option value="">조성</option><option value="G">G장조</option><option value="D">D장조</option><option value="Am">A단조</option><option value="Dm">D단조</option>
             </select>
           </div>
-          <textarea rows={2} placeholder="메모 (어려운 마디, 운지 등)" value={p.memo ?? ''} onChange={(e) => updatePiece(p.id, { memo: e.target.value })} />
+          <DraftInput multiline placeholder="메모 (어려운 마디, 운지 등)" value={p.memo ?? ''} onCommit={(v) => updatePiece(p.id, { memo: v })} label="메모" />
           <div className="session-controls">
             <button onClick={() => updatePiece(p.id, { lastPracticed: today })}>오늘 연습함</button>
             <button className="danger" onClick={() => { if (confirm(`"${p.title}"을(를) 목록에서 지울까요?`)) db.pieces.delete(p.id); }}>지우기</button>

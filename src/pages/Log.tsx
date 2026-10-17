@@ -27,7 +27,7 @@ export function Log() {
   useBackLayer(view !== 'calendar', () => go('calendar'));
   return (
     <section className="page log">
-      <div className="segmented" role="tablist">
+      <div className="segmented">
         <button className={view === 'calendar' ? 'on' : ''} onClick={() => go('calendar')}>연습 기록</button>
         <button className={view === 'pieces' ? 'on' : ''} onClick={() => go('pieces')}>곡</button>
         <button className={view === 'recordings' ? 'on' : ''} onClick={() => go('recordings')}>녹음</button>
@@ -98,7 +98,7 @@ function Calendar() {
         <div className="cal">
           {WEEKDAYS.map((w) => <span key={w} className="cal-wd">{w}</span>)}
           {cells.map((d, i) => d === null ? <span key={`e${i}`} /> : (
-            <button key={d} className={`cal-day lv${level(byDate.get(d) ?? 0)} ${d === selected ? 'sel' : ''} ${d === today ? 'today' : ''}`} onClick={() => setSelected(d)}>
+            <button key={d} className={`cal-day lv${level(byDate.get(d) ?? 0)} ${d === selected ? 'sel' : ''} ${d === today ? 'today' : ''}`} onClick={() => setSelected(d)} aria-pressed={d === selected} aria-label={`${Number(d.slice(5, 7))}월 ${Number(d.slice(8))}일${byDate.get(d) ? ` 연습 ${formatDuration(byDate.get(d)!)}` : ''}`}>
               {Number(d.slice(8))}
             </button>
           ))}

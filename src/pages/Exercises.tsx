@@ -42,7 +42,7 @@ export async function recordProgress(stepId: string, pct: number, mean: number |
 export async function createExercise(stepId: string, spec: ExerciseSpec, o: ExerciseOptions, seed: number, tempo: number, tip?: string, title?: string, progressId?: string): Promise<number> {
   const m = makeExercise(spec, { ...o, seed, tempo, title });
   if (m.error || !m.xml) throw new Error(m.error ?? '연습곡을 만들지 못했어요.');
-  const existing = await db.scores.filter((s) => s.exercise?.stepId === stepId).first();
+  const existing = await db.scores.where('exercise.stepId').equals(stepId).first();
   const rec: Omit<ScoreFile, 'id'> = { title: m.title, xml: m.xml, createdAt: Date.now(), exercise: { stepId, spec, seed, shiftKeys: m.shiftKeys, tip, tempo, progressId } };
   if (existing?.id) { await db.scores.update(existing.id, { ...rec, lastFrom: undefined, lastTo: undefined }); return existing.id; }
   return db.scores.add(rec as ScoreFile);
@@ -71,7 +71,7 @@ export function nextSuggestions(progress: Record<string, ExerciseProgress>) {
   return { step, bow: { base, key, variant, baseLabel: BOW_BASES.find((b) => b.id === base)!.label } };
 }
 export async function openStep(step: Step, o = loadOpts()): Promise<number> {
-  const prev = await db.scores.filter((s) => s.exercise?.stepId === step.id).first();
+  const prev = await db.scores.where('exercise.stepId').equals(step.id).first();
   const seed = (prev?.exercise?.seed ?? 0) + (prev ? 0 : 1);
   return createExercise(step.id, step.spec, o, seed, step.tempo, step.tip);
 }
@@ -97,7 +97,7 @@ export function Exercises({ onOpen, onBack }: { onOpen: (id: number) => void; on
     setError(null); setBusy(true);
     try {
       if (!newSeed) { onOpen(await openStep(step, opts)); return; }
-      const prev = await db.scores.filter((s) => s.exercise?.stepId === step.id).first();
+      const prev = await db.scores.where('exercise.stepId').equals(step.id).first();
       onOpen(await createExercise(step.id, step.spec, opts, (prev?.exercise?.seed ?? 0) + 1, step.tempo, step.tip));
     } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   }

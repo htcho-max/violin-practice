@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useSession, itemMs, totalMs } from '../state/session';
 import { useSettings } from '../state/settings';
-import { useWakeLock } from '../state/wakeLock';
 import { useSessions } from '../state/useSessions';
 import { clock, formatDuration, localDate, streak } from '../data/dates';
 import type { TabId } from '../components/TabBar';
@@ -38,7 +37,6 @@ export function Today({ go, openSettings }: { go: (t: TabId) => void; openSettin
   const sessions = useSessions();
   const [memo, setMemo] = useState('');
   const [confirmEnd, setConfirmEnd] = useState(false);
-  useWakeLock(!!session && session.runningSince !== null, settings.wakeLock);
   useEffect(() => { if (!session) { setMemo(''); setConfirmEnd(false); } }, [session]);
 
   const today = localDate();
@@ -115,14 +113,14 @@ export function Today({ go, openSettings }: { go: (t: TabId) => void; openSettin
               <li key={r.key}>
                 <span>{r.label}</span>
                 <span className="stepper">
-                  <button className="mini" onClick={() => update({ routine: settings.routine.map((x, j) => (j === i ? { ...x, minutes: Math.max(0, x.minutes - 1) } : x)) })}>−</button>
+                  <button className="mini" aria-label={`${r.label} 1분 줄이기`} onClick={() => update({ routine: settings.routine.map((x, j) => (j === i ? { ...x, minutes: Math.max(0, x.minutes - 1) } : x)) })}>−</button>
                   <b>{r.minutes}분</b>
-                  <button className="mini" onClick={() => update({ routine: settings.routine.map((x, j) => (j === i ? { ...x, minutes: x.minutes + 1 } : x)) })}>＋</button>
+                  <button className="mini" aria-label={`${r.label} 1분 늘리기`} onClick={() => update({ routine: settings.routine.map((x, j) => (j === i ? { ...x, minutes: Math.min(120, x.minutes + 1) } : x)) })}>＋</button>
                 </span>
               </li>
             ))}
           </ol>
-          <button className="primary wide big" onClick={() => start(settings.routine.filter((r) => r.minutes > 0))} data-testid="session-start">▶ 연습 시작</button>
+          <button className="primary wide big" onClick={() => start(settings.routine.filter((r) => r.minutes > 0))} disabled={!settings.routine.some((r) => r.minutes > 0)} data-testid="session-start">▶ 연습 시작</button>
         </div>
         {basicsCard}
         {piecesCard}

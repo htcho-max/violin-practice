@@ -1,12 +1,31 @@
 import { registerSW } from 'virtual:pwa-register';
+import { recorder } from '../audio/recorder';
+import { scorePlayer } from '../score/player';
+import { pitchTracker } from '../audio/pitchTracker';
 
 const KEY = 'violin-app-version';
 let registration: ServiceWorkerRegistration | undefined;
 
-/** 새 버전은 자동으로 받아서 새로고침됩니다. 이전에 쓰던 버전과 다르면 알림용으로 true */
+/** 녹음·채점·재생·마이크 사용 중에는 새로고침하지 않음 */
+function busy(): boolean {
+  return recorder.recording || scorePlayer.playing || pitchTracker.running;
+}
+
+/** 새 버전은 받아 두었다가, 연습 중이 아닐 때 새로고침합니다. 이전에 쓰던 버전과 다르면 알림용으로 true */
 export function setupUpdates(): { updatedFrom: string | null } {
-  registerSW({
+  let waiting: ReturnType<typeof setInterval> | null = null;
+  const updateSW = registerSW({
     immediate: true,
+    onNeedRefresh() {
+      if (waiting) return;
+      const tryApply = () => {
+        if (busy()) return;
+        if (waiting) clearInterval(waiting);
+        updateSW(true);
+      };
+      waiting = setInterval(tryApply, 5000);
+      tryApply();
+    },
     onRegisteredSW(_url, reg) {
       registration = reg;
       // 앱이 오래 열려 있어도 1시간마다 새 버전 확인

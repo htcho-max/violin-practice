@@ -7,7 +7,11 @@ let holders = 0;
 async function acquire() {
   try {
     const wl = (navigator as unknown as { wakeLock?: { request: (t: 'screen') => Promise<Sentinel> } }).wakeLock;
-    if (wl && !sentinel) sentinel = await wl.request('screen');
+    if (wl && !sentinel) {
+      const s = await wl.request('screen');
+      // 기다리는 사이 더 이상 필요 없어졌으면 바로 풀기
+      if (holders <= 0 || sentinel) s.release().catch(() => {}); else sentinel = s;
+    }
   } catch { /* 지원 안 하면 무시 */ }
 }
 

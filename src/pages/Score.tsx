@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { liveQuery } from 'dexie';
 import type { OpenSheetMusicDisplay } from 'opensheetmusicdisplay';
 import { db, type ScoreFile } from '../data/db';
@@ -80,8 +80,9 @@ export function Score() {
     }
   }
 
-  useBackLayer(!!open, () => { const o = open; setOpenId(null); setExView(!!o?.exercise); });
+  // 연습곡 화면 층이 먼저 (악보가 그 위에)
   useBackLayer(exView, () => setExView(false));
+  useBackLayer(!!open, () => { const o = open; setOpenId(null); setExView(!!o?.exercise); });
   if (open) return <ScoreView key={`${open.id}:${open.createdAt}`} score={open} onClose={() => { setOpenId(null); setExView(!!open.exercise); }} />;
   if (exView) return <Exercises onOpen={(id) => { setOpenId(id); }} onBack={() => setExView(false)} />;
   const mine = scores.filter((s) => !s.exercise);
@@ -217,13 +218,14 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
   const [renderError, setRenderError] = useState<string | null>(null);
   const holder = useRef<HTMLDivElement>(null);
   const osmd = useRef<OpenSheetMusicDisplay | null>(null);
-  const pitch = usePitch(settings.minDb);
+  const pitch = usePitch(settings.minDb, { reading: false });
   const [listening, setListening] = useState(false);
   const played = useRef<Played[]>([]);
   const [, tick] = useState(0);
   const [result, setResult] = useState<Scored[] | null>(null);
   const els = useRef<Map<string, string[]>>(new Map());
   const lit = useRef<SVGGElement[]>([]);
+  const litKey = useRef<string | null>(null);
   const [playing, setPlaying] = useState(false);
   const [playBpm, setPlayBpm] = useState(72);
   const [withClick, setWithClick] = useState(false);
@@ -272,24 +274,46 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
     return new Map(result.map((r) => [`${r.note.measure}:${r.note.index}`, colorFor(r)]));
   }, [result, view, rhythm]);
 
+  // 확대·크기 변화는 잠깐 모았다가 한 번만 다시 그리기
+  const [zoomView, setZoomView] = useState(zoom);
+  useEffect(() => { const id = setTimeout(() => setZoomView(zoom), 250); return () => clearTimeout(id); }, [zoom]);
+  const [sizeTick, setSizeTick] = useState(0);
+  useEffect(() => {
+    const el = holder.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    let w = el.clientWidth, id: ReturnType<typeof setTimeout> | null = null;
+    const ro = new ResizeObserver(() => {
+      if (Math.abs(el.clientWidth - w) < 8) return; // 주소창이 나타났다 사라지는 정도는 무시
+      w = el.clientWidth;
+      if (id) clearTimeout(id);
+      id = setTimeout(() => setSizeTick((x) => x + 1), 300);
+    });
+    ro.observe(el);
+    return () => { ro.disconnect(); if (id) clearTimeout(id); };
+  }, []);
+  const osmdInit = useRef<Promise<void> | null>(null);
+  useEffect(() => () => { try { osmd.current?.clear(); } catch { /* 무시 */ } osmd.current = null; }, []);
+
   // 악보 그리기
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
-        if (!osmd.current && holder.current) {
-          osmd.current = await createOSMD(holder.current);
-          await osmd.current.load(score.xml);
+        if (!osmdInit.current && holder.current) {
+          const el = holder.current;
+          osmdInit.current = (async () => { const o = await createOSMD(el); await o.load(score.xml); osmd.current = o; })();
         }
+        await osmdInit.current;
         if (!alive || !osmd.current) return;
         setRendering(true);
         osmd.current.setOptions({ drawFromMeasureNumber: from, drawUpToMeasureNumber: to });
-        osmd.current.zoom = zoom;
+        osmd.current.zoom = zoomView;
         if (parsed.parts.length > 1) showParts(osmd.current, myPart, !!score.showOthers);
         colorNotes(osmd.current, noteColors, myPart);
         osmd.current.render();
         els.current = noteElements(osmd.current, myPart);
         lit.current = [];
+        if (litKey.current) highlight(litKey.current, false); // 다시 그려도 지금 음 강조 유지
         setRenderError(null);
       } catch (e) {
         setRenderError('악보를 그리지 못했어요: ' + ((e as Error).message ?? ''));
@@ -298,34 +322,47 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
       }
     })();
     return () => { alive = false; };
-  }, [score.xml, from, to, noteColors, myPart, score.showOthers, zoom, focus]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [score.xml, from, to, noteColors, myPart, score.showOthers, zoomView, focus, sizeTick]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => { db.scores.update(score.id!, { lastFrom: from, lastTo: to }); }, [score.id, from, to]);
+  useEffect(() => {
+    const id = setTimeout(() => { db.scores.update(score.id!, { lastFrom: from, lastTo: to }).catch(() => {}); }, 1500);
+    return () => clearTimeout(id);
+  }, [score.id, from, to]);
 
   // 연주 듣기: 음 단위로 모으기
+  const segRef = useRef<NoteSegmenter | null>(null);
+  /** 채점을 시작할 때의 구간 (듣는 중에 구간을 바꿔도 채점은 이 구간으로) */
+  const listenCtx = useRef<{ expected: typeof expected; from: number; to: number; inSession: boolean } | null>(null);
+
   useEffect(() => {
     if (!listening) return;
     const seg = new NoteSegmenter(equalRef(settings.a4));
+    segRef.current = seg;
     const unsub = pitchTracker.subscribe((r) => {
       const n = seg.push(r.time, r.freq);
       if (n) { played.current.push({ midi: n.midi, cents: n.settledCents ?? n.meanCents, start: n.start }); tick((x) => x + 1); }
     });
-    return () => {
-      unsub();
-      const n = seg.flush();
-      if (n) played.current.push({ midi: n.midi, cents: n.settledCents ?? n.meanCents, start: n.start });
-    };
+    return unsub;
   }, [listening, settings.a4]);
 
-  const live = useMemo(() => (listening ? alignNotes(expected, played.current) : null), [listening, expected, played.current.length]); // eslint-disable-line react-hooks/exhaustive-deps
-  const liveDone = live ? live.filter((r) => r.status !== 'missed').length : 0;
+  // 진행 표시: 짧은 구간은 정확히 맞춰 보고, 긴 구간은 연주한 음 수로 대신 (매 음마다 전체 맞추기는 무거움)
+  const live = useMemo(() => {
+    if (!listening) return 0;
+    const exp = listenCtx.current?.expected ?? expected;
+    if (exp.length <= 160) return alignNotes(exp, played.current).filter((r) => r.status !== 'missed').length;
+    let n = 0, last = -1;
+    for (const p of played.current) { if (p.midi !== last) n++; last = p.midi; }
+    return Math.min(exp.length, n);
+  }, [listening, expected, played.current.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  const liveDone = live;
 
-  function highlight(key: string | null) {
+  function highlight(key: string | null, scroll = true) {
+    litKey.current = key;
     lit.current.forEach((g) => g.classList.remove('now-note'));
     const ids = key ? els.current.get(key) ?? [] : [];
     lit.current = ids.map((id) => document.getElementById(id) ?? document.getElementById(`vf-${id}`)).filter((x): x is HTMLElement & SVGGElement => !!x) as unknown as SVGGElement[];
     lit.current.forEach((g) => g.classList.add('now-note'));
-    lit.current[0]?.scrollIntoView?.({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+    if (scroll) lit.current[0]?.scrollIntoView?.({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
   }
   const curIdx = useRef(0);
   async function playRange(resumeAt?: number, o: { keepListening?: boolean; muteMine?: boolean } = {}) {
@@ -340,18 +377,25 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
       click: withClick,
       voice,
       mute: o.muteMine ?? (hasAcc && mute),
-      onNote: (e) => {
-        if (e) curIdx.current = base + plan.events.indexOf(e);
+      onNote: (e, idx) => {
+        if (e) curIdx.current = base + (idx ?? plan.events.indexOf(e));
         highlight(e ? `${e.note.measure}:${e.note.index}` : null);
         setNowMeasure(e ? e.note.measure : null);
       },
       onEnd: () => {
-        if (o.keepListening) { highlight(null); setPlaying(false); setTimeout(() => stopRef.current(), 800); return; }
-        if (loopRef.current) playRange(); else { highlight(null); setPlaying(false); }
+        if (o.keepListening) {
+          highlight(null); setPlaying(false);
+          endTimer.current = setTimeout(() => { endTimer.current = null; stopRef.current(); }, 800);
+          return;
+        }
+        if (loopRef.current) playRangeRef.current(); else { highlight(null); setPlaying(false); }
       },
     });
     setVoiceNote(voice === 'sample' && !scorePlayer.usedSample ? '바이올린 소리를 불러오지 못해서 합성음으로 재생해요. (첫 재생은 인터넷 연결이 필요해요)' : '');
   }
+  const playRangeRef = useRef(playRange);
+  playRangeRef.current = playRange;
+  const endTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // 듣는 중에 템포를 바꾸면 지금 음부터 새 템포로 이어서
   const playingRef = useRef(false);
   playingRef.current = playing;
@@ -370,61 +414,82 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
   function restartPlay() { setPausedAt(null); curIdx.current = 0; playRange(); }
 
   async function start() {
-    if (playing) stopPlay();
+    if (listeningRef.current) return;
+    if (playing || pausedAt !== null) stopPlay();
     setResult(null);
     setSaved(null);
+    setPassMsg(null);
     played.current = [];
-    if (!pitch.on) await pitch.start();
+    if (!pitchTracker.running) await pitch.start();
+    if (!pitchTracker.running) return; // 마이크를 못 열면 시작하지 않음 (오류 문구는 pitch.error)
     runStart.current = Date.now();
+    listenCtx.current = { expected, from, to, inSession: !!session && session.runningSince !== null };
     if (recOn) { try { await recorder.start(settings.a4); } catch { /* 녹음 못 해도 채점은 계속 */ } }
+    listeningRef.current = true;
     setListening(true);
     if (hasAcc && scoreWithAcc) { curIdx.current = 0; playRange(undefined, { keepListening: true, muteMine: true }); }
   }
   function stop() {
+    if (!listeningRef.current) return; // 두 번 끝나지 않게
+    listeningRef.current = false;
+    if (endTimer.current) { clearTimeout(endTimer.current); endTimer.current = null; }
     if (playingRef.current) stopPlay();
+    // 마지막 음까지 모으고 바로 채점
+    const last_ = segRef.current?.flush();
+    if (last_) played.current.push({ midi: last_.midi, cents: last_.settledCents ?? last_.meanCents, start: last_.start });
+    segRef.current = null;
     setListening(false);
-    // flush 는 effect 정리에서 → 다음 틱에 채점
-    const recP = recorder.recording ? recorder.stop() : Promise.resolve(null);
+    const ctx = listenCtx.current ?? { expected, from, to, inSession: !!session };
+    listenCtx.current = null;
+    const recP = recorder.stop();
     const durationSec = (Date.now() - runStart.current) / 1000;
-    setTimeout(async () => {
-      const r = alignNotes(expected, played.current);
-      setResult(r);
-      // 연습 기록 + 녹음 저장
+    const r = alignNotes(ctx.expected, played.current);
+    setResult(r);
+    const sm = summarizeScore(r);
+    // 연습곡 진도는 먼저 (저장 공간 문제로 녹음 저장이 실패해도 남도록)
+    if (ex && ctx.from <= firstNoteMeasure && ctx.to >= last && r.length) {
+      const pct = Math.round((sm.ok / Math.max(1, sm.total)) * 100);
+      recordProgress(ex.progressId ?? ex.stepId, pct, sm.meanAbs, playBpm).then((ok) => setPassMsg(ok ? '통과! 다음 단계로 가거나 템포를 올려 보세요.' : null)).catch(() => {});
+    }
+    void (async () => {
       const rec = await recP;
-      const sm = summarizeScore(r);
       const played_ = r.filter((x) => x.status !== 'missed').length;
-      if (played_ >= 2 && durationSec >= 2) {
-        const rh = analyzeRhythm(parsed, r);
-        const weak = [...sm.byMeasure.entries()].filter(([, v]) => v !== null).sort((a, b) => b[1]! - a[1]!).slice(0, 3).map(([m]) => m);
-        const run: ScoreRun = {
-          createdAt: Date.now(), date: localDate(), scoreId: score.id!, title: score.title, pieceId: score.pieceId, exerciseId: ex?.stepId,
-          from, to, durationSec, total: sm.total, ok: sm.ok, wrong: sm.wrong, missed: sm.missed, meanAbs: sm.meanAbs,
-          rhythmMs: rh?.meanAbsMs ?? null, bpm: rh ? Math.round(rh.bpm) : null, inSession: !!session, weakMeasures: weak,
-        };
-        const runId = await db.scoreRuns.add(run);
-        let recId: number | undefined;
-        if (rec && rec.durationSec >= 1) {
-          recId = await db.recordings.add({
-            createdAt: run.createdAt, date: run.date, pieceId: score.pieceId, title: `${score.title} · ${from}~${to}마디`,
+      if (played_ < 2 || durationSec < 2) return;
+      const rh = analyzeRhythm(parsed, r);
+      const weak = [...sm.byMeasure.entries()].filter(([, v]) => v !== null).sort((a, b) => b[1]! - a[1]!).slice(0, 3).map(([m]) => m);
+      const run: ScoreRun = {
+        createdAt: Date.now(), date: localDate(), scoreId: score.id!, title: score.title, pieceId: score.pieceId, exerciseId: ex?.stepId,
+        from: ctx.from, to: ctx.to, durationSec, total: sm.total, ok: sm.ok, wrong: sm.wrong, missed: sm.missed, meanAbs: sm.meanAbs,
+        rhythmMs: rh?.meanAbsMs ?? null, bpm: rh ? Math.round(rh.bpm) : null, inSession: ctx.inSession, weakMeasures: weak,
+      };
+      let runId: number;
+      try { runId = await db.scoreRuns.add(run); } catch { setSaved('연습 기록을 저장하지 못했어요. 저장 공간을 확인해 주세요.'); return; }
+      let recMsg = '';
+      if (rec && rec.durationSec >= 1) {
+        try {
+          const recId = await db.recordings.add({
+            createdAt: run.createdAt, date: run.date, pieceId: score.pieceId, title: `${score.title} · ${ctx.from}~${ctx.to}마디`,
             durationSec: rec.durationSec, mime: rec.mime, blob: rec.blob, track: rec.track, scoreId: score.id!, runId,
           } as Recording);
           await db.scoreRuns.update(runId, { recordingId: recId });
-        }
-        if (score.pieceId) await db.pieces.update(score.pieceId, { lastPracticed: run.date });
-        setSaved(recId ? '연습 기록과 녹음을 저장했어요.' : '연습 기록을 저장했어요.');
+          recMsg = '과 녹음';
+        } catch { recMsg = '(녹음은 저장 공간이 부족해 저장하지 못했어요)'; }
       }
-      if (ex && from <= firstNoteMeasure && to >= last && r.length) {
-        const sm = summarizeScore(r);
-        const pct = Math.round((sm.ok / Math.max(1, sm.total)) * 100);
-        recordProgress(ex.progressId ?? ex.stepId, pct, sm.meanAbs, playBpm).then((ok) => setPassMsg(ok ? '통과! 다음 단계로 가거나 템포를 올려 보세요.' : null));
-      }
-    }, 0);
+      if (score.pieceId) await db.pieces.update(score.pieceId, { lastPracticed: run.date }).catch(() => {});
+      setSaved(recMsg.startsWith('(') ? `연습 기록을 저장했어요 ${recMsg}` : `연습 기록${recMsg}을 저장했어요.`);
+    })();
+    pitch.stop(); // 채점이 끝나면 마이크를 닫음
   }
-  // 화면을 떠날 때 녹음 정리
-  useEffect(() => () => { if (recorder.recording) recorder.stop(); }, []);
+  // 화면을 떠날 때: 듣는 중이면 지금까지를 채점·저장 (layout 정리는 마이크가 닫히기 전에 돌아감)
+  useLayoutEffect(() => () => {
+    if (listeningRef.current) stopRef.current();
+    else if (recorder.recording) void recorder.stop();
+    if (endTimer.current) clearTimeout(endTimer.current);
+  }, []);
   const stopRef = useRef(stop);
   stopRef.current = stop;
   const setRange = (a: number, b: number) => {
+    if (listeningRef.current) return; // 채점 중에는 구간 고정
     if (playingRef.current || pausedAt !== null) stopPlay();
     const A = Math.max(first, Math.min(last, a)), B = Math.max(A, Math.min(last, b));
     setFrom(A); setTo(B); setResult(null);
@@ -485,20 +550,20 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
       <div className="card">
         <div className="range-row">
           <span className="rg"><span className="range-label">시작</span>
-          <NumField value={from} min={first} max={last} label="시작 마디" testId="from" width={52} onChange={(v) => setRange(v, lenLock ? v + lenLock - 1 : Math.max(v, to))} /></span>
+          <NumField value={from} min={first} max={last} label="시작 마디" disabled={listening} testId="from" width={52} onChange={(v) => setRange(v, lenLock ? v + lenLock - 1 : Math.max(v, to))} /></span>
           <span className="rg"><span className="range-label">끝</span>
-          <NumField value={to} min={from} max={last} label="끝 마디" testId="to" width={52} onChange={(v) => { setLenLock(null); setRange(from, v); }} /></span>
+          <NumField value={to} min={from} max={last} label="끝 마디" disabled={listening} testId="to" width={52} onChange={(v) => { setLenLock(null); setRange(from, v); }} /></span>
           <span className="muted small">{span}마디 · {expected.length}음</span>
         </div>
         <div className="chips len-chips" data-testid="len-chips">
           {[1, 2, 4, 8, 16].map((n) => (
-            <button key={n} className={`chip ${lenLock === n ? 'on' : ''}`} onClick={() => { setLenLock(n); setRange(from, from + n - 1); }}>{n}마디</button>
+            <button key={n} className={`chip ${lenLock === n ? 'on' : ''}`} disabled={listening} onClick={() => { setLenLock(n); setRange(from, from + n - 1); }}>{n}마디</button>
           ))}
         </div>
         <div className="session-controls">
-          <button onClick={() => setRange(from - span, to - span)} disabled={from <= first}>◀ 앞 구간</button>
-          <button onClick={() => { setLenLock(null); setRange(firstNoteMeasure, last); }}>전체</button>
-          <button onClick={() => setRange(from + span, to + span)} disabled={to >= last}>다음 구간 ▶</button>
+          <button onClick={() => setRange(from - span, to - span)} disabled={listening || from <= first}>◀ 앞 구간</button>
+          <button disabled={listening} onClick={() => { setLenLock(null); setRange(firstNoteMeasure, last); }}>전체</button>
+          <button onClick={() => setRange(from + span, to + span)} disabled={listening || to >= last}>다음 구간 ▶</button>
         </div>
       </div>
 
@@ -705,9 +770,9 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
 function RecPlayer({ id }: { id: number }) {
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
-    let u: string | null = null;
-    db.recordings.get(id).then((r) => { if (r) { u = URL.createObjectURL(r.blob); setUrl(u); } });
-    return () => { if (u) URL.revokeObjectURL(u); };
+    let u: string | null = null, alive = true;
+    db.recordings.get(id).then((r) => { if (r && alive) { u = URL.createObjectURL(r.blob); setUrl(u); } }).catch(() => {});
+    return () => { alive = false; if (u) URL.revokeObjectURL(u); };
   }, [id]);
   return url ? <audio controls src={url} preload="metadata" className="player" /> : <p className="muted small">녹음이 지워졌어요.</p>;
 }

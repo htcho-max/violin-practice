@@ -25,40 +25,63 @@ export class PracticeRecorder {
   get recording() { return this.rec?.state === 'recording'; }
   get elapsed() { return this.rec ? performance.now() / 1000 - this.t0 : 0; }
 
-  async start(a4: number) {
-    if (this.rec) return;
-    if (!pitchTracker.running) { await pitchTracker.start(); this.startedTracker = true; }
-    const stream = pitchTracker.mediaStream!;
-    this.mime = pickMime();
-    this.rec = new MediaRecorder(stream, this.mime ? { mimeType: this.mime } : undefined);
-    this.chunks = [];
-    this.track = [];
-    this.rec.ondataavailable = (e) => { if (e.data.size) this.chunks.push(e.data); };
-    this.t0 = performance.now() / 1000;
-    this.nextT = 0;
-    this.unsub = pitchTracker.subscribe((r) => {
-      const t = r.time - this.t0;
-      if (t < this.nextT) return;
-      this.nextT = Math.round((t + STEP) / STEP) * STEP;
-      const n = r.freq ? freqToNote(r.freq, a4) : null;
-      this.track.push([Math.round(t * 100) / 100, n ? Math.round(n.cents * 10) / 10 : null, n?.midi ?? null]);
-    });
-    this.rec.start(1000);
+  /** 상태를 처음으로 (스트림이 끊기거나 시작에 실패했을 때) */
+  private reset() {
+    this.unsub?.();
+    this.unsub = null;
+    this.rec = null;
+    if (this.startedTracker) { pitchTracker.stop(); this.startedTracker = false; }
   }
 
-  stop(): Promise<{ blob: Blob; track: TrackPoint[]; durationSec: number; mime: string }> {
+  async start(a4: number) {
+    if (this.rec && this.rec.state !== 'inactive') return;
+    this.rec = null;
+    try {
+      if (!pitchTracker.running) { await pitchTracker.start(); this.startedTracker = true; }
+      const stream = pitchTracker.mediaStream!;
+      this.mime = pickMime();
+      const rec = new MediaRecorder(stream, this.mime ? { mimeType: this.mime } : undefined);
+      this.rec = rec;
+      this.chunks = [];
+      this.track = [];
+      rec.ondataavailable = (e) => { if (e.data.size) this.chunks.push(e.data); };
+      // 스트림이 끊겨 저절로 멈춘 경우 (전화, 마이크 해제 등)
+      rec.onstop = () => { if (this.rec === rec && !this.stopping) this.reset(); };
+      rec.onerror = () => { if (this.rec === rec) this.reset(); };
+      this.t0 = performance.now() / 1000;
+      this.nextT = 0;
+      this.unsub = pitchTracker.subscribe((r) => {
+        const t = r.time - this.t0;
+        if (t < this.nextT) return;
+        this.nextT = Math.round((t + STEP) / STEP) * STEP;
+        const n = r.freq ? freqToNote(r.freq, a4) : null;
+        this.track.push([Math.round(t * 100) / 100, n ? Math.round(n.cents * 10) / 10 : null, n?.midi ?? null]);
+      });
+      rec.start(1000);
+    } catch (e) {
+      this.reset();
+      throw e;
+    }
+  }
+
+  private stopping = false;
+  /** 녹음 중이 아니면 null */
+  stop(): Promise<{ blob: Blob; track: TrackPoint[]; durationSec: number; mime: string } | null> {
+    const rec = this.rec;
+    if (!rec || rec.state === 'inactive') { this.reset(); return Promise.resolve(null); }
+    this.stopping = true;
     return new Promise((resolve) => {
-      const rec = this.rec!;
       const durationSec = this.elapsed;
       rec.onstop = () => {
         const mime = rec.mimeType || this.mime || 'audio/webm';
-        resolve({ blob: new Blob(this.chunks, { type: mime }), track: this.track, durationSec, mime });
-        this.rec = null;
+        const out = { blob: new Blob(this.chunks, { type: mime }), track: this.track, durationSec, mime };
+        this.stopping = false;
+        this.reset();
+        resolve(out);
       };
       this.unsub?.();
       this.unsub = null;
-      rec.stop();
-      if (this.startedTracker) { pitchTracker.stop(); this.startedTracker = false; }
+      try { rec.stop(); } catch { this.stopping = false; this.reset(); resolve(null); }
     });
   }
 }

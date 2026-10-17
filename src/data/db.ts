@@ -126,6 +126,8 @@ class PracticeDB extends Dexie {
     });
     this.version(3).stores({ scores: '++id, createdAt, pieceId' });
     this.version(4).stores({ scoreRuns: '++id, date, scoreId, createdAt' });
+    // 연습곡 단계로 바로 찾기 (악보 XML 을 모두 읽지 않게)
+    this.version(5).stores({ scores: '++id, createdAt, pieceId, exercise.stepId' });
   }
 }
 

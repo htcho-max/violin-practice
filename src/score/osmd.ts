@@ -4,7 +4,7 @@ import type { OpenSheetMusicDisplay } from 'opensheetmusicdisplay';
 export async function createOSMD(el: HTMLElement): Promise<OpenSheetMusicDisplay> {
   const { OpenSheetMusicDisplay } = await import('opensheetmusicdisplay');
   return new OpenSheetMusicDisplay(el, {
-    autoResize: true,
+    autoResize: false, // 크기 변화는 화면에서 직접 (재생 중 강조가 끊기지 않게)
     backend: 'svg',
     drawTitle: false,
     drawSubtitle: false,

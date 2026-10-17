@@ -53,6 +53,20 @@ function RecTrace({ rec, seconds }: { rec: Recording; seconds: number }) {
   return <CentsTrace source={src} seconds={seconds} fixed height={120} />;
 }
 
+/** 녹음 결과를 저장 (1초 미만은 버림). 실패하면 false */
+async function saveRecording(p: ReturnType<typeof recorder.stop>, pieceId: string, pieces: { id: string; title: string }[]): Promise<boolean> {
+  const r = await p;
+  if (!r || r.durationSec < 1) return true;
+  try {
+    await db.recordings.add({
+      createdAt: Date.now(), date: localDate(), pieceId: pieceId || undefined,
+      title: pieces.find((x) => x.id === pieceId)?.title ?? '녹음', durationSec: r.durationSec, mime: r.mime, blob: r.blob, track: r.track,
+    });
+    if (pieceId) await db.pieces.update(pieceId, { lastPracticed: localDate() });
+    return true;
+  } catch { return false; }
+}
+
 export function Recordings() {
   const { settings } = useSettings();
   const recs = useRecordings();
@@ -77,8 +91,10 @@ export function Recordings() {
     }, 200);
     return () => clearInterval(id);
   }, [busy]);
-  // 화면을 떠나면 녹음 정리
-  useEffect(() => () => { if (recorder.recording) recorder.stop(); }, []);
+  // 화면을 떠나도 녹음은 저장
+  const pieceRef = useRef(pieceId);
+  pieceRef.current = pieceId;
+  useEffect(() => () => { if (recorder.recording) void saveRecording(recorder.stop(), pieceRef.current, pieces); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const name = (id?: string) => pieces.find((p) => p.id === id)?.title;
 
@@ -88,15 +104,10 @@ export function Recordings() {
     catch { setError('녹음을 시작할 수 없어요. 마이크 권한을 확인해 주세요.'); if (!recorder.recording && pitchTracker.running) pitchTracker.stop(); }
   }
   async function stop() {
-    const r = await recorder.stop();
+    const p = recorder.stop();
     setBusy(false);
-    if (r.durationSec < 1) return;
-    const now = Date.now();
-    await db.recordings.add({
-      createdAt: now, date: localDate(), pieceId: pieceId || undefined,
-      title: name(pieceId) ?? '녹음', durationSec: r.durationSec, mime: r.mime, blob: r.blob, track: r.track,
-    });
-    if (pieceId) await db.pieces.update(pieceId, { lastPracticed: localDate() });
+    const ok = await saveRecording(p, pieceId, pieces);
+    if (!ok) setError('녹음을 저장하지 못했어요. 저장 공간을 확인해 주세요.');
   }
 
   const toggleCompare = (id: number) => setCompare((c) => (c.includes(id) ? c.filter((x) => x !== id) : [...c.slice(-1), id]));

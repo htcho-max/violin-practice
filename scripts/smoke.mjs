@@ -103,6 +103,18 @@ try {
     await page.reload();
     await tab(page, '메트로놈');
     ok((await page.getByTestId('bpm').textContent()) === '89', '새로고침 후 BPM 유지');
+    // 백업 → 되돌리기
+    await tab(page, '오늘');
+    await page.getByRole('button', { name: '설정' }).click();
+    const [dl] = await Promise.all([page.waitForEvent('download'), page.getByTestId('backup').click()]);
+    const fp = await dl.path();
+    const fs = await import('node:fs');
+    const bk = JSON.parse(fs.readFileSync(fp, 'utf8'));
+    ok(bk.version === 2 && bk.tables.sessions.length >= 1 && bk.tables.pieces.length >= 6, `백업 파일 (세션 ${bk.tables.sessions.length}, 곡 ${bk.tables.pieces.length})`);
+    page.once('dialog', (d) => d.accept());
+    await page.getByTestId('restore-file').setInputFiles(fp);
+    ok(/되돌렸어요/.test(await page.getByTestId('data-msg').textContent({ timeout: 5000 }).catch(() => '')), '백업에서 되돌리기');
+    await page.waitForTimeout(2500);
     ok(errors.length === 0, `콘솔 오류 없음 ${errors.join(' | ')}`);
     await browser.close();
   }

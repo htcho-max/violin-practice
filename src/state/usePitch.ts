@@ -2,13 +2,15 @@ import { useCallback, useEffect, useState } from 'react';
 import { pitchTracker, type PitchReading } from '../audio/pitchTracker';
 
 /** 화면에 있는 동안만 마이크를 씁니다. */
-export function usePitch(minDb: number) {
+export function usePitch(minDb: number, opts: { reading?: boolean } = {}) {
+  const wantReading = opts.reading !== false;
   const [reading, setReading] = useState<PitchReading | null>(null);
   const [on, setOn] = useState(pitchTracker.running);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => { pitchTracker.minDb = minDb; }, [minDb]);
-  useEffect(() => pitchTracker.subscribe(setReading), []);
+  // 매 프레임 값이 필요 없는 화면(악보)은 구독하지 않아 다시 그리기를 줄임
+  useEffect(() => (wantReading ? pitchTracker.subscribe(setReading) : undefined), [wantReading]);
   useEffect(() => () => { pitchTracker.stop(); }, []);
 
   const start = useCallback(async () => {

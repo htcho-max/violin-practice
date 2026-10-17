@@ -60,7 +60,7 @@ export function Tuner() {
 
   return (
     <section className="page tuner">
-      <div className="segmented" role="tablist">
+      <div className="segmented">
         <button className={mode === 'auto' ? 'on' : ''} onClick={() => { setMode('auto'); stopRef0(); }}>자동</button>
         <button className={mode === 'string' ? 'on' : ''} onClick={() => setMode('string')}>현 선택</button>
       </div>

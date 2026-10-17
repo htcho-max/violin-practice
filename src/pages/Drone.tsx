@@ -123,7 +123,7 @@ export function Drone() {
         {pitch.error && <p className="error">{pitch.error}</p>}
       </div>
 
-      <div className="segmented" role="tablist">
+      <div className="segmented">
         <button className={mode === 'graph' ? 'on' : ''} onClick={() => setMode('graph')}>음정 그래프</button>
         <button className={mode === 'arrival' ? 'on' : ''} onClick={() => setMode('arrival')}>도착 음정</button>
         <button className={mode === 'vibrato' ? 'on' : ''} onClick={() => setMode('vibrato')}>비브라토</button>
