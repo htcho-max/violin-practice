@@ -44,7 +44,10 @@ export function parseMusicXML(xml: string, opt: ParseOptions = {}): ParsedScore 
   let time: [number, number] = [4, 4];
   let nominal = 4;
   for (const m of Array.from(part.children).filter((c) => c.nodeName === 'measure')) {
-    const num = Number(m.getAttribute('number')) || measures.length + 1;
+    // 못갖춘마디 0 도 그대로 (0 을 거짓으로 보면 1번 마디와 겹침). 번호가 없거나 겹치면 앞 번호 + 1
+    const raw = (m.getAttribute('number') ?? '').trim();
+    const n0 = raw === '' ? NaN : Number(raw);
+    const num = Number.isFinite(n0) && !measures.includes(n0) ? n0 : measures.length ? measures[measures.length - 1] + 1 : 1;
     measures.push(num);
     let pos = 0; // 4분음표 단위
     let lastStart = 0;
