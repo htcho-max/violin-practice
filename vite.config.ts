@@ -20,7 +20,8 @@ export default defineConfig(({ mode }) => ({
     VitePWA({
       registerType: 'prompt', // 새 버전은 연습 중이 아닐 때 적용 (appUpdate.ts)
       // 악보 표시 라이브러리(약 1.5MB)도 오프라인에서 쓰도록 캐시
-      workbox: { maximumFileSizeToCacheInBytes: 5 * 1024 * 1024 },
+      // 새 서비스 워커는 바로 넘겨받고(기다리다 업데이트가 막히지 않게), 새로고침은 앱이 연습 중이 아닐 때 (appUpdate.ts)
+      workbox: { maximumFileSizeToCacheInBytes: 5 * 1024 * 1024, skipWaiting: true, clientsClaim: true },
       includeAssets: ['icon.svg', 'icon-*.png', 'apple-touch-icon.png', 'violin/*.mp3'],
       manifest: {
         name: '바이올린 연습 도우미',

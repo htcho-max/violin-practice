@@ -32,6 +32,17 @@ export function setupUpdates(): { updatedFrom: string | null } {
       if (reg) setInterval(() => { reg.update().catch(() => {}); }, 60 * 60 * 1000);
     },
   });
+  // 새 서비스 워커가 넘겨받으면(이미 앱을 쓰던 중이었다면) 연습 중이 아닐 때 새로고침
+  if ('serviceWorker' in navigator) {
+    const hadController = !!navigator.serviceWorker.controller;
+    let reloading = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!hadController || reloading) return;
+      reloading = true;
+      const tryReload = () => { if (busy()) { setTimeout(tryReload, 5000); return; } location.reload(); };
+      tryReload();
+    });
+  }
   let prev: string | null = null;
   try {
     prev = localStorage.getItem(KEY);
