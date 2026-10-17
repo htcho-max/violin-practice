@@ -11,11 +11,13 @@ import { NoteSegmenter, equalRef } from '../audio/segment';
 import { pitchTracker } from '../audio/pitchTracker';
 import { midiName } from '../audio/notes';
 import { centsText } from '../components/CentsGauge';
+import { NumField } from '../components/NumField';
 import { usePieces } from '../state/usePieces';
 import { usePitch } from '../state/usePitch';
 import { useSettings } from '../state/settings';
 import { useWakeLock } from '../state/wakeLock';
 import { useSession } from '../state/session';
+import { useBackLayer } from '../state/back';
 import { recorder } from '../audio/recorder';
 import { localDate, clock } from '../data/dates';
 import { useScoreRuns, runText } from '../state/useScoreRuns';
@@ -78,6 +80,8 @@ export function Score() {
     }
   }
 
+  useBackLayer(!!open, () => { const o = open; setOpenId(null); setExView(!!o?.exercise); });
+  useBackLayer(exView, () => setExView(false));
   if (open) return <ScoreView key={`${open.id}:${open.createdAt}`} score={open} onClose={() => { setOpenId(null); setExView(!!open.exercise); }} />;
   if (exView) return <Exercises onOpen={(id) => { setOpenId(id); }} onBack={() => setExView(false)} />;
   const mine = scores.filter((s) => !s.exercise);
@@ -228,6 +232,13 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
   const [voice, setVoice] = useState<Voice>('sample');
   const [voiceNote, setVoiceNote] = useState('');
   const [nowMeasure, setNowMeasure] = useState<number | null>(null);
+  const [lenLock, setLenLock] = useState<number | null>(null);
+  /** 일시정지한 음 번호 (null 이면 일시정지 아님) */
+  const [pausedAt, setPausedAt] = useState<number | null>(null);
+  const [focus, setFocus] = useState(() => { try { return localStorage.getItem('violin-score-focus') === '1'; } catch { return false; } });
+  useEffect(() => { try { localStorage.setItem('violin-score-focus', focus ? '1' : '0'); } catch { /* 무시 */ } }, [focus]);
+  const [zoom, setZoom] = useState(() => { const d = typeof window !== 'undefined' && window.innerWidth >= 720 ? 1.3 : 1; try { return Number(localStorage.getItem('violin-score-zoom')) || d; } catch { return d; } });
+  useEffect(() => { try { localStorage.setItem('violin-score-zoom', String(zoom)); } catch { /* 무시 */ } }, [zoom]);
   const loopRef = useRef(loop);
   loopRef.current = loop;
   useWakeLock(listening || playing, settings.wakeLock);
@@ -273,6 +284,7 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
         if (!alive || !osmd.current) return;
         setRendering(true);
         osmd.current.setOptions({ drawFromMeasureNumber: from, drawUpToMeasureNumber: to });
+        osmd.current.zoom = zoom;
         if (parsed.parts.length > 1) showParts(osmd.current, myPart, !!score.showOthers);
         colorNotes(osmd.current, noteColors, myPart);
         osmd.current.render();
@@ -286,7 +298,7 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
       }
     })();
     return () => { alive = false; };
-  }, [score.xml, from, to, noteColors, myPart, score.showOthers]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [score.xml, from, to, noteColors, myPart, score.showOthers, zoom, focus]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { db.scores.update(score.id!, { lastFrom: from, lastTo: to }); }, [score.id, from, to]);
 
@@ -321,6 +333,7 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
     const full = planPlayback(parsed, { bpm: playBpm, from, to, countIn: o.keepListening ? true : resumeAt === undefined && countIn }, hasAcc && (accOn || o.keepListening) ? accParts : []);
     const plan = resumeAt === undefined ? full : slicePlan(full, resumeAt);
     const base = resumeAt ?? 0;
+    setPausedAt(null);
     setPlaying(true);
     await scorePlayer.play(plan, {
       a4: settings.a4,
@@ -351,7 +364,10 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
     const id = setTimeout(() => { if (playingRef.current) playRange(curIdx.current); }, 200);
     return () => clearTimeout(id);
   }, [playBpm]); // eslint-disable-line react-hooks/exhaustive-deps
-  function stopPlay() { scorePlayer.stop(); highlight(null); setNowMeasure(null); setPlaying(false); }
+  function stopPlay() { scorePlayer.stop(); highlight(null); setNowMeasure(null); setPlaying(false); setPausedAt(null); }
+  function pausePlay() { scorePlayer.stop(); setPlaying(false); setPausedAt(curIdx.current); }
+  function resumePlay() { const i = pausedAt ?? 0; setPausedAt(null); playRange(i); }
+  function restartPlay() { setPausedAt(null); curIdx.current = 0; playRange(); }
 
   async function start() {
     if (playing) stopPlay();
@@ -409,6 +425,7 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
   const stopRef = useRef(stop);
   stopRef.current = stop;
   const setRange = (a: number, b: number) => {
+    if (playingRef.current || pausedAt !== null) stopPlay();
     const A = Math.max(first, Math.min(last, a)), B = Math.max(A, Math.min(last, b));
     setFrom(A); setTo(B); setResult(null);
   };
@@ -440,7 +457,8 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
   const worst = result ? result.filter((r) => r.status === 'ok').sort((a, b) => Math.abs(b.cents!) - Math.abs(a.cents!)).slice(0, 6) : [];
 
   return (
-    <section className="page score">
+    <section className={`page score score-view ${focus ? 'focus' : ''}`} data-testid="score-view">
+      <div className="score-top">
       <div className="card-head">
         <button className="mini" onClick={() => { if (listening) stop(); pitch.stop(); onClose(); }}>◀ 목록</button>
         <b className="score-title">{score.title}</b>
@@ -465,16 +483,21 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
       )}
 
       <div className="card">
-        <div className="row-setting">
-          <span>마디</span>
-          <input className="num" type="number" value={from} min={first} max={last} onChange={(e) => setRange(Number(e.target.value), Math.max(Number(e.target.value), to))} aria-label="시작 마디" data-testid="from" />
-          <span>~</span>
-          <input className="num" type="number" value={to} min={first} max={last} onChange={(e) => setRange(from, Number(e.target.value))} aria-label="끝 마디" data-testid="to" />
-          <span className="muted small">{expected.length}음</span>
+        <div className="range-row">
+          <span className="rg"><span className="range-label">시작</span>
+          <NumField value={from} min={first} max={last} label="시작 마디" testId="from" width={52} onChange={(v) => setRange(v, lenLock ? v + lenLock - 1 : Math.max(v, to))} /></span>
+          <span className="rg"><span className="range-label">끝</span>
+          <NumField value={to} min={from} max={last} label="끝 마디" testId="to" width={52} onChange={(v) => { setLenLock(null); setRange(from, v); }} /></span>
+          <span className="muted small">{span}마디 · {expected.length}음</span>
+        </div>
+        <div className="chips len-chips" data-testid="len-chips">
+          {[1, 2, 4, 8, 16].map((n) => (
+            <button key={n} className={`chip ${lenLock === n ? 'on' : ''}`} onClick={() => { setLenLock(n); setRange(from, from + n - 1); }}>{n}마디</button>
+          ))}
         </div>
         <div className="session-controls">
           <button onClick={() => setRange(from - span, to - span)} disabled={from <= first}>◀ 앞 구간</button>
-          <button onClick={() => setRange(firstNoteMeasure, last)}>전체</button>
+          <button onClick={() => { setLenLock(null); setRange(firstNoteMeasure, last); }}>전체</button>
           <button onClick={() => setRange(from + span, to + span)} disabled={to >= last}>다음 구간 ▶</button>
         </div>
       </div>
@@ -483,9 +506,7 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
         <div className="card-head"><b>악보 듣기</b>{playing && nowMeasure !== null && <span className="muted small">{nowMeasure}마디</span>}</div>
         <div className="row-setting">
           <span>♩ =</span>
-          <button className="mini" onClick={() => setPlayBpm((b) => Math.max(30, b - 5))}>−5</button>
-          <input className="num" type="number" min={30} max={200} value={playBpm} onChange={(e) => setPlayBpm(Math.max(30, Math.min(200, Number(e.target.value) || 30)))} aria-label="재생 템포" data-testid="play-bpm" />
-          <button className="mini" onClick={() => setPlayBpm((b) => Math.min(200, b + 5))}>+5</button>
+          <NumField value={playBpm} min={30} max={200} step={5} label="재생 템포" testId="play-bpm" onChange={setPlayBpm} />
         </div>
         <div className="row-setting">
           <label><input type="checkbox" checked={countIn} onChange={(e) => setCountIn(e.target.checked)} /> 시작 전 한 마디 세기</label>
@@ -503,8 +524,8 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
           </div>
         )}
         {voiceNote && <p className="hint">{voiceNote}</p>}
-        <button className={`secondary wide ${playing ? 'on' : ''}`} onClick={playing ? stopPlay : () => { curIdx.current = 0; playRange(); }} disabled={!expected.length} data-testid="play-toggle">
-          {playing ? '■ 듣기 멈추기' : `▶ ${from}~${to}마디 들어보기`}
+        <button className={`secondary wide ${playing ? 'on' : ''}`} onClick={playing || pausedAt !== null ? stopPlay : () => { curIdx.current = 0; playRange(); }} disabled={!expected.length} data-testid="play-toggle">
+          {playing || pausedAt !== null ? '■ 듣기 멈추기' : `▶ ${from}~${to}마디 들어보기`}
         </button>
         <p className="hint">템포는 4분음표 기준이에요. 처음엔 느리게 들으며 음정과 리듬을 익히고, 반복을 켜 두고 같이 연주해 보세요.</p>
       </div>
@@ -529,38 +550,25 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
         <p className="hint">템포는 상관없어요. 악보 순서대로 연주하면 음을 맞춰 보고, 음표 색으로 보여줘요. 초록 ±10센트 안, 노랑 ±20, 빨강 그 이상, 보라 다른 음, 회색 놓친 음. 박자도 함께 봐요: 내 템포에 맞춰 각 음이 일찍·늦게 들어갔는지.</p>
       </div>
 
-      <div className="card" data-testid="acc-card">
-        <b>파트 · 반주</b>
-        {parsed.parts.length > 1 && (
-          <>
-            <div className="row-setting">
-              <span>내 파트</span>
-              <select value={myPart} onChange={(e) => { db.scores.update(score.id!, { part: Number(e.target.value) }); setResult(null); }} aria-label="내 파트" data-testid="my-part">
-                {parsed.parts.map((n, i) => <option key={i} value={i}>{n}</option>)}
-              </select>
-            </div>
-            <label className="small"><input type="checkbox" checked={!!score.showOthers} onChange={(e) => db.scores.update(score.id!, { showOthers: e.target.checked })} /> 다른 파트도 악보에 보이기</label>
-          </>
-        )}
-        {score.accXml ? (
-          <div className="rec-head">
-            <span className="small">반주: <b>{score.accName || '반주 악보'}</b></span>
-            <button className="mini danger" onClick={() => db.scores.update(score.id!, { accXml: undefined, accName: undefined })} aria-label="반주 지우기">✕</button>
-          </div>
-        ) : (
-          <button className="secondary wide" onClick={() => accFile.current?.click()} data-testid="acc-attach">반주 악보 붙이기 (MusicXML)</button>
-        )}
-        <input ref={accFile} type="file" accept=".musicxml,.xml" hidden onChange={(e) => e.target.files?.[0] && attachAcc(e.target.files[0])} data-testid="acc-file" />
-        {accError && <p className="error">{accError}</p>}
-        <p className="hint">{hasAcc ? `반주 ${accParts.length}파트 · 피아노 파트는 피아노 소리, 그 밖은 바이올린 소리로 들려줘요.` : '바흐 더블의 2바이올린 파트나 피아노 반주를 붙이면 같이 들으며 연습할 수 있어요. 마디 번호가 같은 악보여야 해요.'}</p>
       </div>
-
+      <div className="score-main">
+      <div className="sheet-bar">
+        <span className="muted small">{from}~{to}마디{nowMeasure !== null ? ` · 지금 ${nowMeasure}마디` : ''}</span>
+        <span className="zoom">
+          <button className={`mini ${focus ? 'on' : ''}`} onClick={() => setFocus(!focus)} data-testid="focus-toggle">{focus ? '메뉴 보기' : '악보만'}</button>
+          <button className="mini" onClick={() => setZoom((z) => Math.max(0.5, Math.round((z - 0.1) * 10) / 10))} aria-label="악보 작게">가−</button>
+          <button className="mini" onClick={() => setZoom(1)} aria-label="악보 기본 크기">{Math.round(zoom * 100)}%</button>
+          <button className="mini" onClick={() => setZoom((z) => Math.min(2, Math.round((z + 0.1) * 10) / 10))} aria-label="악보 크게">가+</button>
+        </span>
+      </div>
       <div className="score-sheet">
         {rendering && <p className="muted small">악보를 그리는 중…</p>}
         {renderError && <p className="error">{renderError}</p>}
         <div ref={holder} data-testid="osmd" />
       </div>
+      </div>
 
+      <div className="score-bottom">
       {sum && (
         <div className="card" data-testid="score-result">
           <div className="stats">
@@ -632,6 +640,63 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
       )}
 
       <RunHistory runs={runs} onPick={(r) => setRange(r.from, r.to)} />
+      <div className="card" data-testid="acc-card">
+        <b>파트 · 반주</b>
+        {parsed.parts.length > 1 && (
+          <>
+            <div className="row-setting">
+              <span>내 파트</span>
+              <select value={myPart} onChange={(e) => { db.scores.update(score.id!, { part: Number(e.target.value) }); setResult(null); }} aria-label="내 파트" data-testid="my-part">
+                {parsed.parts.map((n, i) => <option key={i} value={i}>{n}</option>)}
+              </select>
+            </div>
+            <label className="small"><input type="checkbox" checked={!!score.showOthers} onChange={(e) => db.scores.update(score.id!, { showOthers: e.target.checked })} /> 다른 파트도 악보에 보이기</label>
+          </>
+        )}
+        {score.accXml ? (
+          <div className="rec-head">
+            <span className="small">반주: <b>{score.accName || '반주 악보'}</b></span>
+            <button className="mini danger" onClick={() => db.scores.update(score.id!, { accXml: undefined, accName: undefined })} aria-label="반주 지우기">✕</button>
+          </div>
+        ) : (
+          <button className="secondary wide" onClick={() => accFile.current?.click()} data-testid="acc-attach">반주 악보 붙이기 (MusicXML)</button>
+        )}
+        <input ref={accFile} type="file" accept=".musicxml,.xml" hidden onChange={(e) => e.target.files?.[0] && attachAcc(e.target.files[0])} data-testid="acc-file" />
+        {accError && <p className="error">{accError}</p>}
+        <p className="hint">{hasAcc ? `반주 ${accParts.length}파트 · 피아노 파트는 피아노 소리, 그 밖은 바이올린 소리로 들려줘요.` : '바흐 더블의 2바이올린 파트나 피아노 반주를 붙이면 같이 들으며 연습할 수 있어요. 마디 번호가 같은 악보여야 해요.'}</p>
+      </div>
+
+      </div>
+
+      {(focus || playing || pausedAt !== null || listening) && (
+        <div className="float-ctl" data-testid="float-ctl" role="toolbar" aria-label="재생 조작">
+          {listening ? (
+            <>
+              <span className="float-info"><span className="rec-dot" /> {liveDone}/{expected.length}음</span>
+              <button className="primary" onClick={stop} data-testid="float-stop-score">■ 끝내고 채점</button>
+            </>
+          ) : !playing && pausedAt === null ? (
+            <>
+              <button className="mini" onClick={() => setRange(from - span, to - span)} disabled={from <= first} aria-label="앞 구간">‹</button>
+              <span className="float-info">{from}~{to}마디</span>
+              <button className="mini" onClick={() => setRange(from + span, to + span)} disabled={to >= last} aria-label="다음 구간">›</button>
+              <button className="primary" onClick={() => { curIdx.current = 0; playRange(); }} disabled={!expected.length} data-testid="float-play">▶ 듣기</button>
+              <button onClick={start} disabled={!expected.length} data-testid="float-score">● 채점</button>
+            </>
+          ) : (
+            <>
+              <span className="float-info">{nowMeasure ?? from}마디 · ♩{playBpm}</span>
+              <button className="mini" onClick={() => setPlayBpm((b) => Math.max(30, b - 5))} aria-label="느리게">−</button>
+              <button className="mini" onClick={() => setPlayBpm((b) => Math.min(200, b + 5))} aria-label="빠르게">+</button>
+              {playing
+                ? <button className="primary" onClick={pausePlay} data-testid="float-pause">❚❚ 멈춤</button>
+                : <button className="primary" onClick={resumePlay} data-testid="float-resume">▶ 이어서</button>}
+              <button onClick={restartPlay} aria-label="처음부터" data-testid="float-restart">⏮</button>
+              <button onClick={stopPlay} aria-label="정지" data-testid="float-stop">■</button>
+            </>
+          )}
+        </div>
+      )}
     </section>
   );
 }

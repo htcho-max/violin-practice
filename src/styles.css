@@ -218,3 +218,93 @@ details.card > summary.card-summary > .muted { margin-right: auto; font-size: 14
 .folder-title { font-weight: 700; margin: 6px 0 2px; }
 .folder-manage { display: flex; flex-direction: column; gap: 8px; margin: 8px 0; }
 .mini-select { max-width: 92px; font-size: 12px; padding: 4px; }
+
+/* 숫자 입력 (− 칸 +) */
+.numfield { display: inline-flex; align-items: center; gap: 4px; }
+.numfield .num { text-align: center; padding: 8px 4px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); font-size: 16px; }
+.range-row { display: flex; align-items: center; gap: 6px 8px; flex-wrap: wrap; }
+.range-label { font-size: 13px; color: var(--muted); }
+.len-chips .chip { min-height: 34px; padding: 4px 10px; font-size: 13px; }
+
+/* 악보 위 막대: 확대/축소 */
+.score-main { display: flex; flex-direction: column; gap: 6px; }
+.sheet-bar { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.sheet-bar .zoom { display: inline-flex; gap: 4px; }
+.score-top, .score-bottom { display: flex; flex-direction: column; gap: 12px; }
+
+/* 재생 중 떠 있는 조작 막대 */
+.float-ctl {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  bottom: calc(72px + env(safe-area-inset-bottom)); z-index: 20;
+  display: flex; align-items: center; gap: 6px; padding: 8px 10px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 999px;
+  box-shadow: 0 6px 20px rgba(0,0,0,.18); max-width: calc(100vw - 16px);
+}
+.float-ctl button { min-height: 44px; border-radius: 999px; padding: 6px 14px; white-space: nowrap; }
+.float-ctl button.mini { min-width: 40px; padding: 4px 8px; }
+.float-info { font-size: 13px; color: var(--muted); white-space: nowrap; padding: 0 4px; display: inline-flex; align-items: center; gap: 6px; }
+.score-view { padding-bottom: 72px; }
+
+/* ── 태블릿·넓은 화면 ── */
+@media (min-width: 720px) {
+  .app { max-width: 1100px; }
+  main { padding-left: 24px; padding-right: 24px; }
+  /* 카드가 많은 화면은 두 줄로 */
+  .page.today, .page-sub, .page.exercises, .page.score:not(.score-view) { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+  .page.today > .today-head, .page.today > .session, .page-sub > .stats, .page-sub > .segmented, .page.exercises > .card-head { grid-column: 1 / -1; }
+  .tabbar .tab { max-width: 120px; font-size: 13px; }
+  .tuner, .metronome, .drone { max-width: 640px; margin: 0 auto; width: 100%; }
+}
+/* 악보 화면: 넓으면 왼쪽 조작, 오른쪽 악보 (악보는 화면에 고정) */
+@media (min-width: 900px), (orientation: landscape) and (min-width: 700px) {
+  .app:has(.score-view) { max-width: none; }
+  .score-view {
+    display: grid; grid-template-columns: minmax(300px, 360px) minmax(0, 1fr);
+    grid-template-areas: "top main" "bottom main"; align-items: start; column-gap: 16px;
+  }
+  .score-view > .score-top { grid-area: top; }
+  .score-view > .score-bottom { grid-area: bottom; }
+  .score-view > .score-main {
+    grid-area: main; position: sticky; top: 8px;
+    max-height: calc(100dvh - 96px - env(safe-area-inset-bottom)); overflow: hidden;
+  }
+  .score-view .score-sheet { overflow: auto; flex: 1; }
+  .float-ctl { left: auto; right: 24px; transform: none; }
+}
+/* 가로로 눕힌 휴대폰: 위아래 여백 줄이기 */
+@media (orientation: landscape) and (max-height: 520px) {
+  .topbar { padding-top: calc(env(safe-area-inset-top) + 4px); padding-bottom: 0; }
+  .topbar h1 { font-size: 16px; }
+  .tabbar .tab { min-height: 44px; padding: 4px 0; flex-direction: row; gap: 6px; }
+  main { padding-bottom: calc(56px + env(safe-area-inset-bottom)); }
+  .float-ctl { bottom: calc(52px + env(safe-area-inset-bottom)); }
+  button.big { min-height: 48px; font-size: 17px; }
+  .score-view > .score-main { max-height: calc(100dvh - 64px); }
+}
+
+/* 악보만 보기 */
+.score-view.focus > .score-top > :not(.card-head), .score-view.focus > .score-bottom { display: none; }
+.score-view.focus { display: flex; flex-direction: column; }
+.score-view.focus > .score-main { position: static; max-height: none; }
+button.mini.on { border-color: var(--accent); color: var(--accent); font-weight: 700; }
+/* 좁은 화면에서는 떠 있는 막대를 꽉 차게 */
+@media (max-width: 480px) {
+  .float-ctl { left: 8px; right: 8px; transform: none; justify-content: space-between; gap: 4px; padding: 6px; }
+  .float-ctl button { padding: 6px 10px; }
+  .float-ctl button.mini { min-width: 34px; padding: 4px 6px; }
+  .float-info { font-size: 12px; padding: 0 2px; }
+}
+/* 태블릿 세로: 구간·듣기 카드를 나란히 */
+@media (min-width: 720px) and (orientation: portrait) and (max-width: 899px) {
+  .score-view:not(.focus) > .score-top { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; }
+  .score-view:not(.focus) > .score-top > .card-head { grid-column: 1 / -1; }
+  .score-view:not(.focus) > .score-top > .card:has(.big), .score-view:not(.focus) > .score-top > [data-testid=exercise-card] { grid-column: 1 / -1; }
+}
+.range-row .rg { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.score-view.focus { display: flex !important; }
+.score-view.focus > :not(.float-ctl) { width: 100%; }
+.score-view.focus > .score-main { max-height: none !important; }
+@media (min-width: 720px) { .app:has(.score-view.focus) { max-width: none; } }
+.sheet-bar > .muted { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sheet-bar .zoom button { white-space: nowrap; }
+@media (max-width: 480px) { .sheet-bar .zoom button.mini { padding: 4px 7px; font-size: 13px; } }

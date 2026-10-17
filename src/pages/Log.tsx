@@ -5,6 +5,7 @@ import { db } from '../data/db';
 import { addDays, formatDuration, localDate, streak } from '../data/dates';
 import { Pieces } from './Pieces';
 import { Recordings, RecPlayerById } from './Recordings';
+import { useBackLayer } from '../state/back';
 import { useScoreRuns, runText } from '../state/useScoreRuns';
 import { clock } from '../data/dates';
 
@@ -23,6 +24,7 @@ type View = 'calendar' | 'pieces' | 'recordings';
 export function Log() {
   const [view, setView] = useState<View>(() => { try { return (localStorage.getItem('violin-log-view') as View) || 'calendar'; } catch { return 'calendar'; } });
   const go = (v: View) => { setView(v); try { localStorage.setItem('violin-log-view', v); } catch { /* 무시 */ } };
+  useBackLayer(view !== 'calendar', () => go('calendar'));
   return (
     <section className="page log">
       <div className="segmented" role="tablist">

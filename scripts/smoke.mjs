@@ -179,6 +179,40 @@ try {
     await page.waitForTimeout(1500);
     const after = await page.evaluate(() => document.querySelector('.now-note')?.id);
     ok(!!before && !!after && before !== after, `재생 중 템포 변경 후 계속 진행 (${before} → ${after})`);
+    // 떠 있는 조작: 멈춤 → 이어서
+    if (await page.getByTestId('float-stop').isVisible().catch(() => false)) await page.getByTestId('float-stop').click();
+    await page.getByTestId('play-bpm').fill('60');
+    await page.getByTestId('play-bpm').blur();
+    await page.getByTestId('play-toggle').click();
+    await page.waitForTimeout(5000);
+    ok(await seen(page.getByTestId('float-pause')), '재생 중 떠 있는 멈춤 버튼');
+    await page.getByTestId('float-pause').click();
+    const pausedId = await page.evaluate(() => document.querySelector('.now-note')?.id);
+    await page.waitForTimeout(1200);
+    const still = await page.evaluate(() => document.querySelector('.now-note')?.id);
+    ok(!!pausedId && pausedId === still, `멈추면 그 음에서 정지 (${pausedId})`);
+    await page.getByTestId('float-resume').click();
+    await page.waitForTimeout(1600);
+    const moved = await page.evaluate(() => document.querySelector('.now-note')?.id);
+    ok(!!moved && moved !== pausedId, `이어서 재생 (${pausedId} → ${moved})`);
+    await page.getByTestId('float-stop').click();
+    ok(!(await page.getByTestId('float-ctl').isVisible().catch(() => false)), '정지하면 떠 있는 막대 사라짐');
+    // 마디 입력: 다 지우고 새로 입력, 길이 칩
+    await page.getByTestId('to').fill('');
+    await page.getByTestId('to').fill('2');
+    await page.getByTestId('to').blur();
+    ok((await page.getByTestId('to').inputValue()) === '2', '끝 마디 지우고 다시 입력');
+    await page.getByTestId('len-chips').getByRole('button', { name: '1마디' }).click();
+    await page.waitForTimeout(400);
+    ok((await page.getByTestId('to').inputValue()) === (await page.getByTestId('from').inputValue()), '1마디 칩 → 끝 = 시작');
+    await page.getByRole('button', { name: '끝 마디 늘리기' }).click();
+    await page.waitForTimeout(400);
+    ok(Number(await page.getByTestId('to').inputValue()) === Number(await page.getByTestId('from').inputValue()) + 1, '끝 마디 + 버튼');
+    // 휴대폰 뒤로 가기: 악보 → 목록
+    await page.goBack();
+    ok(await seen(page.getByTestId('open-exercises')), `뒤로 가기로 악보 목록 (${page.url()})`);
+    await page.getByTestId('score-open').first().click();
+    await page.waitForTimeout(1200);
     const order = await page.evaluate(() => { const a = document.querySelector('[data-testid=play-card]'), b = document.querySelector('.score-sheet'); return !!(a && b && (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING)); });
     ok(order, '메뉴가 악보 위에 있음');
     await page.screenshot({ path: 'scripts/shot-layout.png', fullPage: true });
