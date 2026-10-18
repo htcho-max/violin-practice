@@ -13,6 +13,10 @@ export interface Articulation {
   slurIn?: boolean;
   /** 피치카토 */
   pizz?: boolean;
+  /** 활 표시 (∏ 내림활 / V 올림활) */
+  bow?: 'up' | 'down';
+  /** 셈여림 세기 (mf = 0.78). 악보에 셈여림 표시가 있을 때만 */
+  vel?: number;
 }
 export interface ScoreNote { measure: number; index: number; midi: number; beat: number; dur: number; art?: Articulation }
 export interface ParsedScore {
@@ -25,6 +29,10 @@ export interface ParsedScore {
   time: [number, number];
   /** 파트 이름들 (여러 파트 악보) */
   parts: string[];
+  /** 셈여림·꺾쇠 표시 (위치는 곡 처음부터 4분음표 단위) */
+  dyn: DynEvent[];
+  /** 마디가 시작하는 위치 (4분음표 단위) */
+  measureStart: Map<number, number>;
 }
 export interface ParseOptions {
   /** 몇 번째 파트 (0부터) */
@@ -32,6 +40,8 @@ export interface ParseOptions {
   /** 반주용: 모든 성부·화음의 모든 음 */
   allNotes?: boolean;
 }
+
+import { velocities, type DynEvent, type UserMarks } from './dynamics';
 
 const STEP: Record<string, number> = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
 
@@ -61,6 +71,9 @@ export function parseMusicXML(xml: string, opt: ParseOptions = {}): ParsedScore 
   // 연주법 상태: 이음줄이 열려 있는지(성부별), 피치카토 구간인지
   const slurOpen = new Map<string, number>();
   let pizz = false;
+  const dyn: DynEvent[] = [];
+  const measureStart = new Map<number, number>();
+  let mStart = 0;
   const artOf = (el: Element, voice: string, chordTone: boolean): Articulation | undefined => {
     const has = (tag: string) => el.getElementsByTagName(tag).length > 0;
     const a: Articulation = {};
@@ -69,6 +82,7 @@ export function parseMusicXML(xml: string, opt: ParseOptions = {}): ParsedScore 
     if (has('accent') || has('strong-accent')) a.accent = true;
     if (has('tenuto')) a.tenuto = true;
     if (pizz || has('pizzicato')) a.pizz = true;
+    if (has('down-bow')) a.bow = 'down'; else if (has('up-bow')) a.bow = 'up';
     if (!chordTone) {
       const open = slurOpen.get(voice) ?? 0;
       if (open > 0) a.slurIn = true;
@@ -89,6 +103,7 @@ export function parseMusicXML(xml: string, opt: ParseOptions = {}): ParsedScore 
     const n0 = raw === '' ? NaN : Number(raw);
     const num = Number.isFinite(n0) && !measures.includes(n0) ? n0 : measures.length ? measures[measures.length - 1] + 1 : 1;
     measures.push(num);
+    measureStart.set(num, mStart);
     let pos = 0; // 4분음표 단위
     let lastStart = 0;
     let maxPos = 0;
@@ -103,6 +118,18 @@ export function parseMusicXML(xml: string, opt: ParseOptions = {}): ParsedScore 
       if (el.nodeName === 'direction') {
         const w = Array.from(el.getElementsByTagName('words')).map((x) => x.textContent ?? '').join(' ');
         if (/arco/i.test(w)) pizz = false; else if (/pizz/i.test(w)) pizz = true;
+        const at = mStart + pos;
+        if (/(de)?cresc|dim/i.test(w)) dyn.push({ pos: at, kind: 'words', type: /cresc/i.test(w) && !/decresc/i.test(w) ? 'cresc' : 'dim' });
+        for (const d of Array.from(el.getElementsByTagName('dynamics'))) {
+          const v = d.firstElementChild?.nodeName;
+          if (v) dyn.push({ pos: at, kind: 'dyn', value: v });
+        }
+        for (const w2 of Array.from(el.getElementsByTagName('wedge'))) {
+          const t = w2.getAttribute('type');
+          if (t === 'crescendo') dyn.push({ pos: at, kind: 'wedge', type: 'cresc' });
+          else if (t === 'diminuendo') dyn.push({ pos: at, kind: 'wedge', type: 'dim' });
+          else if (t === 'stop') dyn.push({ pos: at, kind: 'wedge', type: 'stop' });
+        }
         continue;
       }
       if (el.nodeName === 'backup') { pos -= Number(text(el, 'duration')) / divisions; continue; }
@@ -159,12 +186,42 @@ export function parseMusicXML(xml: string, opt: ParseOptions = {}): ParsedScore 
     }
     const whole = Array.from(m.getElementsByTagName('rest')).some((r) => r.getAttribute('measure') === 'yes');
     measureLen.set(num, whole || maxPos === 0 ? nominal : m.getAttribute('implicit') === 'yes' ? maxPos : Math.max(maxPos, nominal));
+    mStart += measureLen.get(num)!;
   }
   // 마디 안 순서 번호
   let cur = -1, k = 0;
   for (const n of notes) { if (n.measure !== cur) { cur = n.measure; k = 0; } n.index = k++; }
   if (all) notes.sort((a, b) => a.measure - b.measure || a.beat - b.beat);
-  return { title, measures, notes, measureLen, time, parts };
+  setVelocities(notes, dyn, measureStart);
+  return { title, measures, notes, measureLen, time, parts, dyn, measureStart };
+}
+
+/** 셈여림 표시로 음마다 세기(art.vel) 채우기. 표시가 없으면 vel 을 지움 */
+function setVelocities(notes: ScoreNote[], dyn: DynEvent[], measureStart: Map<number, number>) {
+  const v = velocities(notes.map((n) => (measureStart.get(n.measure) ?? 0) + n.beat), dyn);
+  notes.forEach((n, i) => {
+    if (v) n.art = { ...n.art, vel: Math.round(v[i] * 1000) / 1000 };
+    else if (n.art?.vel !== undefined) { const { vel: _v, ...rest } = n.art; n.art = Object.keys(rest).length ? rest : undefined; }
+  });
+}
+
+/** 내가 붙인 표시(활·셈여림·꺾쇠)를 악보에 합침. 활은 내 표시가 우선, 셈여림은 악보 표시와 함께 다시 계산 */
+export function applyUserMarks(s: ParsedScore, marks: UserMarks | undefined): ParsedScore {
+  if (!marks || !Object.keys(marks).length) return s;
+  const notes = s.notes.map((n) => ({ ...n, art: n.art ? { ...n.art } : undefined }));
+  const extra: DynEvent[] = [];
+  for (const n of notes) {
+    const m = marks[`${n.measure}:${n.index}`];
+    if (!m) continue;
+    const at = (s.measureStart.get(n.measure) ?? 0) + n.beat;
+    if (m.bow) n.art = { ...n.art, bow: m.bow };
+    if (m.dyn) extra.push({ pos: at, kind: 'dyn', value: m.dyn });
+    if (m.hair === 'cresc' || m.hair === 'dim') extra.push({ pos: at, kind: 'wedge', type: m.hair });
+    if (m.hair === 'end') extra.push({ pos: at + n.dur, kind: 'wedge', type: 'stop' });
+  }
+  const dyn = [...s.dyn, ...extra];
+  setVelocities(notes, dyn, s.measureStart);
+  return { ...s, notes, dyn };
 }
 
 export function notesInRange(s: ParsedScore, from: number, to: number): ScoreNote[] {

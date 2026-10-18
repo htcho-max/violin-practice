@@ -2,3 +2,4 @@
 https://www.npmjs.com/package/tonejs-instrument-violin-mp3
 원본: tonejs-instruments (https://github.com/nbrosowsky/tonejs-instruments)
 앱에서 쓰기 위해 6초로 자르고 80kbps 모노로 다시 인코딩했습니다.
+2026-10-18: 음마다 음색이 달라지지 않도록 15개 샘플의 배음 분포(스펙트럼 모양)를 같은 목표 곡선에 맞추고(±12dB 안에서), 지속 구간 소리 크기를 같게 맞췄습니다.

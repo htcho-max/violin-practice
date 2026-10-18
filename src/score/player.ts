@@ -58,6 +58,9 @@ export function noteShape(e: PlayEvent): NoteShape {
   let attack = a.slurIn && !a.stacc ? 0.04 : 0.012;
   let gain = a.slurIn && !a.accent ? 0.85 : 1;
   if (a.accent) { gain = 1.35; attack = 0.005; }
+  if (a.bow === 'down' && !a.slurIn && !a.accent) attack = Math.min(attack, 0.009); // 내림활은 조금 또렷하게
+  // 셈여림 (mf 기준)
+  if (a.vel !== undefined) gain *= Math.max(0.35, Math.min(1.5, a.vel / 0.78));
   return { len, attack, gain, pizz: !!a.pizz };
 }
 

@@ -2,7 +2,9 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { liveQuery } from 'dexie';
 import type { OpenSheetMusicDisplay } from 'opensheetmusicdisplay';
 import { db, type ScoreFile } from '../data/db';
-import { parseMusicXML, notesInRange, type ParsedScore } from '../score/parse';
+import { parseMusicXML, notesInRange, applyUserMarks, type ParsedScore } from '../score/parse';
+import { markEmpty, type UserMark, type UserMarks } from '../score/dynamics';
+import { DraftInput } from '../components/DraftInput';
 import { alignNotes, summarizeScore, type Played, type Scored } from '../score/align';
 import { createOSMD, colorNotes, noteElements, showParts } from '../score/osmd';
 import { planPlayback, scorePlayer, slicePlan, instFor, type Voice, type AccPart } from '../score/player';
@@ -195,6 +197,8 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
     return out;
   }, [score.xml, score.accXml, parsed, myPart]);
   const hasAcc = accParts.length > 0;
+  /** 재생용: 내가 붙인 표시(활·셈여림)를 합친 악보 */
+  const playParsed = useMemo(() => applyUserMarks(parsed, score.marks), [parsed, score.marks]);
   const [accOn, setAccOn] = useState(true);
   const [mute, setMute] = useState(false);
   const [scoreWithAcc, setScoreWithAcc] = useState(false);
@@ -292,6 +296,59 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
     return () => { ro.disconnect(); if (id) clearTimeout(id); };
   }, []);
   const osmdInit = useRef<Promise<void> | null>(null);
+  // 내 표시: 편집 모드, 고르는 음, 그려진 자리
+  const [renderTick, setRenderTick] = useState(0);
+  const [markMode, setMarkMode] = useState(false);
+  const [markKey, setMarkKey] = useState<string | null>(null);
+  const sheetWrap = useRef<HTMLDivElement>(null);
+  const [markPos, setMarkPos] = useState<{ key: string; x: number; top: number; bottom: number; m: UserMark }[]>([]);
+  const marks: UserMarks = score.marks ?? {};
+  /** 음표 자리: 머리(가로 위치·누르기)와 기둥까지 포함한 위·아래 */
+  const noteRect = (key: string): { left: number; right: number; top: number; bottom: number; outTop: number; outBottom: number } | null => {
+    const ids = els.current.get(key) ?? [];
+    for (const id of ids) { // 붙임줄 뒤 음은 빼고 첫 음만
+      const el = document.getElementById(id) ?? document.getElementById(`vf-${id}`);
+      if (!el) continue;
+      const g = el.getBoundingClientRect();
+      const heads = Array.from(el.querySelectorAll('.vf-notehead')).map((h) => h.getBoundingClientRect()).filter((r) => r.width || r.height);
+      const r = heads.length ? { left: Math.min(...heads.map((h) => h.left)), right: Math.max(...heads.map((h) => h.right)), top: Math.min(...heads.map((h) => h.top)), bottom: Math.max(...heads.map((h) => h.bottom)) } : g;
+      if (!(g.width || g.height)) continue;
+      return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, outTop: Math.min(g.top, r.top), outBottom: Math.max(g.bottom, r.bottom) };
+    }
+    return null;
+  };
+  useEffect(() => {
+    const wrap = sheetWrap.current;
+    if (!wrap) return;
+    const base = wrap.getBoundingClientRect();
+    const out: typeof markPos = [];
+    for (const [key, m] of Object.entries(marks)) {
+      if (markEmpty(m)) continue;
+      const r = noteRect(key);
+      if (!r) continue;
+      out.push({ key, x: (r.left + r.right) / 2 - base.left, top: r.outTop - base.top, bottom: r.outBottom - base.top, m });
+    }
+    setMarkPos(out);
+  }, [renderTick, score.marks]); // eslint-disable-line react-hooks/exhaustive-deps
+  function pickNote(clientX: number, clientY: number) {
+    let best: string | null = null, bd = Infinity;
+    for (const key of els.current.keys()) {
+      const r = noteRect(key);
+      if (!r) continue;
+      const dx = Math.max(r.left - clientX, 0, clientX - r.right), dy = Math.max(r.top - clientY, 0, clientY - r.bottom);
+      const d = Math.hypot(dx, dy * 0.6);
+      if (d < bd) { bd = d; best = key; }
+    }
+    if (best && bd <= 28) setMarkKey(best);
+  }
+  async function saveMark(key: string, patch: Partial<UserMark> | null) {
+    const cur = { ...(score.marks ?? {}) };
+    const next: UserMark = patch === null ? {} : { ...cur[key], ...patch };
+    for (const k of Object.keys(next) as (keyof UserMark)[]) if (next[k] === undefined || next[k] === '') delete next[k];
+    if (markEmpty(next)) delete cur[key]; else cur[key] = next;
+    await db.scores.update(score.id!, { marks: cur });
+  }
+  useBackLayer(markKey !== null, () => setMarkKey(null));
   useEffect(() => () => { try { osmd.current?.clear(); } catch { /* 무시 */ } osmd.current = null; }, []);
 
   // 악보 그리기
@@ -312,6 +369,7 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
         colorNotes(osmd.current, noteColors, myPart);
         osmd.current.render();
         els.current = noteElements(osmd.current, myPart);
+        setRenderTick((x) => x + 1);
         lit.current = [];
         if (litKey.current) highlight(litKey.current, false); // 다시 그려도 지금 음 강조 유지
         setRenderError(null);
@@ -367,7 +425,7 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
   const curIdx = useRef(0);
   async function playRange(resumeAt?: number, o: { keepListening?: boolean; muteMine?: boolean } = {}) {
     if (listening && !o.keepListening) stop();
-    const full = planPlayback(parsed, { bpm: playBpm, from, to, countIn: o.keepListening ? true : resumeAt === undefined && countIn }, hasAcc && (accOn || o.keepListening) ? accParts : []);
+    const full = planPlayback(playParsed, { bpm: playBpm, from, to, countIn: o.keepListening ? true : resumeAt === undefined && countIn }, hasAcc && (accOn || o.keepListening) ? accParts : []);
     const plan = resumeAt === undefined ? full : slicePlan(full, resumeAt);
     const base = resumeAt ?? 0;
     setPausedAt(null);
@@ -620,6 +678,7 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
       <div className="sheet-bar">
         <span className="muted small">{from}~{to}마디{nowMeasure !== null ? ` · 지금 ${nowMeasure}마디` : ''}</span>
         <span className="zoom">
+          <button className={`mini ${markMode ? 'on' : ''}`} onClick={() => { setMarkMode(!markMode); setMarkKey(null); }} disabled={listening} data-testid="mark-toggle" title="음표를 눌러 활·셈여림·메모 붙이기">✎ 표시</button>
           <button className={`mini ${focus ? 'on' : ''}`} onClick={() => setFocus(!focus)} data-testid="focus-toggle">{focus ? '메뉴 보기' : '악보만'}</button>
           <button className="mini" onClick={() => setZoom((z) => Math.max(0.5, Math.round((z - 0.1) * 10) / 10))} aria-label="악보 작게">가−</button>
           <button className="mini" onClick={() => setZoom(1)} aria-label="악보 기본 크기">{Math.round(zoom * 100)}%</button>
@@ -629,7 +688,29 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
       <div className="score-sheet">
         {rendering && <p className="muted small">악보를 그리는 중…</p>}
         {renderError && <p className="error">{renderError}</p>}
-        <div ref={holder} data-testid="osmd" />
+        {markMode && <p className="hint mark-hint">음표를 누르면 활·셈여림·메모를 붙여요. 다 했으면 ✎ 표시를 다시 눌러요.</p>}
+        <div ref={sheetWrap} className={`sheet-wrap ${markMode ? 'marking' : ''}`}
+          onClick={markMode ? (e) => pickNote(e.clientX, e.clientY) : undefined} data-testid="sheet-wrap">
+          <div ref={holder} data-testid="osmd" />
+          <div className="mark-layer" aria-hidden>
+            {markPos.map(({ key, x, top, bottom, m }) => (
+              <div key={key} className={`mark-at ${markKey === key ? 'sel' : ''}`} style={{ left: x }}>
+                {(m.bow || m.text) && (
+                  <span className="mark-up" style={{ top: top - 4 }} data-testid="mark-label">
+                    {m.text && <span className="mark-text">{m.text}</span>}
+                    {m.bow && <b className="mark-bow">{m.bow === 'down' ? '∏' : 'V'}</b>}
+                  </span>
+                )}
+                {(m.dyn || m.hair) && (
+                  <span className="mark-down" style={{ top: bottom + 4 }} data-testid="mark-label">
+                    {m.dyn && <i className="mark-dyn">{m.dyn}</i>}
+                    {m.hair && <b className="mark-hair">{m.hair === 'cresc' ? '＜' : m.hair === 'dim' ? '＞' : '⊣'}</b>}
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
       </div>
 
@@ -733,7 +814,11 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
 
       </div>
 
-      {(focus || playing || pausedAt !== null || listening) && (
+      {markKey !== null && (
+        <MarkSheet keyName={markKey} mark={marks[markKey] ?? {}} onPatch={(p) => saveMark(markKey, p)} onClose={() => setMarkKey(null)} />
+      )}
+
+      {(focus || playing || pausedAt !== null || listening) && !markKey && (
         <div className="float-ctl" data-testid="float-ctl" role="toolbar" aria-label="재생 조작">
           {listening ? (
             <>
@@ -766,6 +851,42 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
   );
 }
 
+
+/** 음표 하나에 표시 붙이기 */
+function MarkSheet({ keyName, mark, onPatch, onClose }: { keyName: string; mark: UserMark; onPatch: (p: Partial<UserMark> | null) => void; onClose: () => void }) {
+  const [measure, idx] = keyName.split(':');
+  const tog = <K extends keyof UserMark>(k: K, v: UserMark[K]) => onPatch({ [k]: mark[k] === v ? undefined : v } as Partial<UserMark>);
+  return (
+    <div className="mark-sheet" data-testid="mark-sheet" role="dialog" aria-label="표시 붙이기">
+      <div className="card-head"><b>{measure}마디 {Number(idx) + 1}번째 음</b><button className="mini" onClick={onClose} data-testid="mark-close">닫기</button></div>
+      <div className="mark-row">
+        <span className="muted small">활</span>
+        <button className={`chip ${mark.bow === 'down' ? 'on' : ''}`} onClick={() => tog('bow', 'down')} data-testid="mark-down">∏ 내림</button>
+        <button className={`chip ${mark.bow === 'up' ? 'on' : ''}`} onClick={() => tog('bow', 'up')} data-testid="mark-up">V 올림</button>
+      </div>
+      <div className="mark-row">
+        <span className="muted small">셈여림</span>
+        {(['pp', 'p', 'mp', 'mf', 'f', 'ff'] as const).map((d) => (
+          <button key={d} className={`chip dyn ${mark.dyn === d ? 'on' : ''}`} onClick={() => tog('dyn', d)} data-testid={`mark-dyn-${d}`}><i>{d}</i></button>
+        ))}
+      </div>
+      <div className="mark-row">
+        <span className="muted small">점점</span>
+        <button className={`chip ${mark.hair === 'cresc' ? 'on' : ''}`} onClick={() => tog('hair', 'cresc')} data-testid="mark-cresc">＜ 세게 시작</button>
+        <button className={`chip ${mark.hair === 'dim' ? 'on' : ''}`} onClick={() => tog('hair', 'dim')} data-testid="mark-dim">＞ 여리게 시작</button>
+        <button className={`chip ${mark.hair === 'end' ? 'on' : ''}`} onClick={() => tog('hair', 'end')} data-testid="mark-hair-end">⊣ 여기까지</button>
+      </div>
+      <div className="mark-row">
+        <span className="muted small">메모</span>
+        <DraftInput value={mark.text ?? ''} onCommit={(v) => onPatch({ text: v.trim() ? v.trim().slice(0, 30) : undefined })} label="메모" placeholder="예: 활 끝까지, 4번" className="mark-input" />
+      </div>
+      <div className="session-controls">
+        <button className="danger" onClick={() => onPatch(null)} data-testid="mark-clear">이 음 표시 지우기</button>
+      </div>
+      <p className="hint">파란 글씨가 내 표시예요. 활·셈여림·꺾쇠는 악보 듣기에도 반영돼요.</p>
+    </div>
+  );
+}
 
 function RecPlayer({ id }: { id: number }) {
   const [url, setUrl] = useState<string | null>(null);

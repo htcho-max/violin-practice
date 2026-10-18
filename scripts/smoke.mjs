@@ -167,6 +167,29 @@ try {
     await page.screenshot({ path: 'scripts/shot-rhythm.png', fullPage: true });
     await page.getByTestId('view-pitch').click();
     await page.waitForTimeout(500);
+    // 내 표시: 음표를 눌러 활·셈여림 붙이기 → 악보 위에 보이고, 다시 열어도 남음
+    await page.getByTestId('mark-toggle').click();
+    const head = await page.locator('[data-testid=osmd] .vf-notehead').nth(1).boundingBox();
+    if (head) await page.mouse.click(head.x + head.width / 2, head.y + head.height / 2);
+    ok(await seen(page.getByTestId('mark-sheet')), '표시 모드에서 음표를 누르면 표시 창');
+    await page.getByTestId('mark-down').click();
+    await page.getByTestId('mark-dyn-p').click();
+    await page.waitForTimeout(400);
+    await page.getByTestId('mark-close').click();
+    await page.waitForTimeout(300);
+    const labels = await page.getByTestId('mark-label').allTextContents();
+    ok(labels.join(' ').includes('∏') && labels.join(' ').includes('p'), `악보 위 내 표시 (${labels.join(' / ')})`);
+    await page.getByTestId('mark-toggle').click();
+    await page.reload();
+    await page.waitForTimeout(800);
+    if (!(await page.getByTestId('score-view').isVisible().catch(() => false))) {
+      await tab(page, '악보');
+      await page.getByText('스모크 테스트 음계').first().click();
+    }
+    await page.waitForTimeout(1800);
+    const labels2 = await page.getByTestId('mark-label').allTextContents();
+    ok(labels2.join(' ').includes('∏'), `다시 열어도 내 표시 유지 (${labels2.join(' / ')})`);
+    await page.screenshot({ path: 'scripts/shot-marks.png', fullPage: true });
     // 반주 붙이기 (같은 악보를 반주로)
     await page.getByTestId('acc-file').setInputFiles(path.resolve('scripts/test-score.musicxml'));
     await page.waitForTimeout(800);

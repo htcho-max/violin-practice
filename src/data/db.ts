@@ -101,6 +101,8 @@ export interface ScoreFile {
   folder?: string;
   /** 앱이 만든 연습곡 (음계·포지션·에튀드) */
   exercise?: ExerciseMeta;
+  /** 내가 악보에 붙인 표시 ("마디:순서" → 활·셈여림·꺾쇠·메모) */
+  marks?: import('../score/dynamics').UserMarks;
 }
 export interface ExerciseMeta { stepId: string; spec: import('../exercise/curriculum').ExerciseSpec; seed: number; shiftKeys: string[]; tip?: string; tempo: number; progressId?: string }
 export interface ExerciseProgress { best: number; mean: number | null; passed: boolean; at: number; bpm?: number; tries: number }
