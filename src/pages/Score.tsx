@@ -13,6 +13,7 @@ import { analyzeRhythm, rhythmTone } from '../score/rhythm';
 import { NoteSegmenter, equalRef } from '../audio/segment';
 import { pitchTracker } from '../audio/pitchTracker';
 import { midiName } from '../audio/notes';
+import { LivePitch } from '../components/LivePitch';
 import { centsText } from '../components/CentsGauge';
 import { NumField } from '../components/NumField';
 import { usePieces } from '../state/usePieces';
@@ -263,6 +264,8 @@ function ScoreView({ score, onClose, initial }: { score: ScoreFile; onClose: () 
   /** 채점할 때 박자: 끔 / 깜빡임만 / 소리 */
   const [scoreMetro, setScoreMetroS] = useState<'off' | 'visual' | 'sound'>(() => { try { const v = localStorage.getItem('score-metro'); return v === 'visual' || v === 'sound' ? v : 'off'; } catch { return 'off'; } });
   const setScoreMetro = (v: 'off' | 'visual' | 'sound') => { setScoreMetroS(v); try { localStorage.setItem('score-metro', v); } catch { /* 무시 */ } };
+  const [livePitch, setLivePitchS] = useState<boolean>(() => { try { return localStorage.getItem('score-live-pitch') !== '0'; } catch { return true; } });
+  const setLivePitch = (v: boolean) => { setLivePitchS(v); try { localStorage.setItem('score-live-pitch', v ? '1' : '0'); } catch { /* 무시 */ } };
   const beatDot = useRef<HTMLSpanElement | null>(null);
   const beatTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onBeat = (_k: number, accent: boolean) => {
@@ -887,6 +890,7 @@ function ScoreView({ score, onClose, initial }: { score: ScoreFile; onClose: () 
         ) : (
           <>
             <div className="rec-live"><span className="rec-dot" /> {recorder.recording ? '녹음 · ' : ''}듣는 중 · {liveDone}/{expected.length}음</div>
+            {livePitch && <div className="live-pitch-row"><span className="muted small">지금 내는 음</span> <LivePitch a4={settings.a4} /></div>}
             <div className="progress"><div style={{ width: `${(liveDone / Math.max(1, expected.length)) * 100}%` }} /></div>
             <button className="primary wide big stop" onClick={stop} data-testid="score-stop">■ 끝내고 채점</button>
           </>
@@ -904,6 +908,9 @@ function ScoreView({ score, onClose, initial }: { score: ScoreFile; onClose: () 
               <button key={v} type="button" className={`chip ${scoreMetro === v ? 'on' : ''}`} onClick={() => setScoreMetro(v)} data-testid={`score-metro-${v}`}>{l}</button>
             ))}
           </div>
+        )}
+        {!listening && (
+          <label className="small"><input type="checkbox" checked={livePitch} onChange={(e) => setLivePitch(e.target.checked)} data-testid="score-live-pitch" /> 연주하는 동안 지금 내는 음 보기 (튜너보다 천천히 움직여요)</label>
         )}
         {!listening && scoreMetro !== 'off' && (
           <p className="hint small">재생 템포 ♩{playBpm}로 한 마디 세고 시작해요. 악보에 지금 칠 음도 따라 표시돼요.{scoreMetro === 'sound' ? ' 이어폰(유선 권장)으로 들으면 녹음에 클릭이 안 들어가요. 스피커로 들어도 채점은 클릭 소리를 빼고 해요.' : ' 소리 없이 아래 점이 박마다 깜빡여요.'}</p>
@@ -1121,6 +1128,7 @@ function ScoreView({ score, onClose, initial }: { score: ScoreFile; onClose: () 
           {listening ? (
             <>
               {playing && <span ref={beatDot} className="beat-dot" data-testid="beat-dot" aria-hidden />}
+              {livePitch && <LivePitch a4={settings.a4} compact />}
               <span className="float-info"><span className="rec-dot" /> {liveDone}/{expected.length}음</span>
               <button className="primary" onClick={stop} data-testid="float-stop-score">■ 끝내고 채점</button>
             </>

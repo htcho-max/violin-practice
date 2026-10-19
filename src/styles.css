@@ -405,3 +405,20 @@ button.mini.on { border-color: var(--accent); color: var(--accent); font-weight:
 .run-insight p { margin: 4px 0; }
 .run-insight .sharp { color: #dc2626; }
 .run-insight .flat { color: #2563eb; }
+
+/* 악보 연주 중 실시간 음 */
+.live-pitch { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 999px; background: color-mix(in srgb, var(--fg, #222) 6%, transparent); }
+.live-pitch .lp-name { font-weight: 800; font-size: 18px; min-width: 2.6em; text-align: center; font-variant-numeric: tabular-nums; }
+.live-pitch .lp-cents { font-size: 12px; font-weight: 700; min-width: 2.6em; font-variant-numeric: tabular-nums; }
+.live-pitch .lp-bar { position: relative; width: 70px; height: 10px; border-radius: 5px; background: color-mix(in srgb, var(--fg, #222) 10%, transparent); overflow: hidden; }
+.live-pitch .lp-zone { position: absolute; left: 40%; width: 20%; top: 0; bottom: 0; background: color-mix(in srgb, #15803d 25%, transparent); }
+.live-pitch .lp-mid { position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: currentColor; opacity: .4; }
+.live-pitch .lp-needle { position: absolute; top: -1px; bottom: -1px; width: 3px; margin-left: -1.5px; border-radius: 2px; background: currentColor; transition: left .12s linear, opacity .2s; }
+.live-pitch[data-tone="good"] { color: #15803d; }
+.live-pitch[data-tone="warn"] { color: #ca8a04; }
+.live-pitch[data-tone="bad"] { color: #dc2626; }
+.live-pitch[data-tone="idle"] { color: var(--muted, #888); }
+.live-pitch.compact .lp-bar { width: 52px; }
+.live-pitch.compact .lp-name { font-size: 16px; }
+@media (max-width: 420px) { .live-pitch .lp-cents { display: none; } }
+.live-pitch-row { display: flex; align-items: center; gap: 8px; margin: 6px 0; }

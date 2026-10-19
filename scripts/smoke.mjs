@@ -149,7 +149,9 @@ try {
     await page.getByTestId('to').fill('2');
     await page.waitForTimeout(800);
     await page.getByTestId('score-start').click();
-    await page.waitForTimeout(5200);
+    const lpSeen = new Set();
+    for (let i = 0; i < 26; i++) { await page.waitForTimeout(200); for (const t of await page.getByTestId('live-pitch').allTextContents()) { const m = t.match(/^([A-G]#?\d)/); if (m) lpSeen.add(m[1]); } }
+    ok(lpSeen.has('A4') && lpSeen.size >= 2, `연주 중 지금 내는 음 보기 (${[...lpSeen].join(' ')})`);
     await page.getByTestId('score-stop').click();
     await page.waitForTimeout(1200);
     const res = await page.getByTestId('score-result').textContent();
