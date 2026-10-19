@@ -318,7 +318,7 @@ function ScoreView({ score, onClose, initial }: { score: ScoreFile; onClose: () 
   const [passMsg, setPassMsg] = useState<string | null>(null);
   const [regenBusy, setRegenBusy] = useState(false);
   useEffect(() => { if (ex) setPlayBpm(ex.tempo); }, [ex?.stepId]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { if (piece?.currentBpm) setPlayBpm(piece.currentBpm); else if (piece?.targetBpm) setPlayBpm(Math.round(piece.targetBpm * 0.7)); }, [piece?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (piece?.currentBpm) setPlayBpm(piece.currentBpm); else if (piece?.targetBpm) setPlayBpm(Math.round(piece.targetBpm * 0.7)); else if (parsed.tempo) setPlayBpm(parsed.tempo); }, [piece?.id, parsed.tempo]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => scorePlayer.stop(), []);
 
   const expected = useMemo(() => notesInRange(parsed, from, to), [parsed, from, to]);

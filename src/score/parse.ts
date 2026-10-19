@@ -37,6 +37,8 @@ export interface ParsedScore {
   parts: string[];
   /** 셈여림·꺾쇠 표시 (위치는 곡 처음부터 4분음표 단위) */
   dyn: DynEvent[];
+  /** 악보에 적힌 처음 템포 (4분음표 기준 BPM), 없으면 undefined */
+  tempo?: number;
   /** 마디가 시작하는 위치 (4분음표 단위) */
   measureStart: Map<number, number>;
 }
@@ -245,7 +247,9 @@ function parseDoc(doc: Document, opt: ParseOptions): ParsedScore {
   for (const n of notes) { if (n.measure !== cur) { cur = n.measure; k = 0; } n.index = k++; }
   if (all) notes.sort((a, b) => a.measure - b.measure || a.beat - b.beat);
   setVelocities(notes, dyn, measureStart);
-  const res: ParsedScore = { title, measures, notes, measureLen, time, parts, dyn, measureStart };
+  const snd = Array.from(doc.getElementsByTagName('sound')).find((e) => e.getAttribute('tempo'));
+  const tq = snd ? Number(snd.getAttribute('tempo')) : NaN;
+  const res: ParsedScore = { title, measures, notes, measureLen, time, parts, dyn, measureStart, ...(Number.isFinite(tq) && tq >= 20 && tq <= 300 ? { tempo: Math.round(tq) } : {}) };
   return track ? ({ ...res, doc, els, ties: tieEls } as TrackedScore) : res;
 }
 
