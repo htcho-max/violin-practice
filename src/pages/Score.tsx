@@ -14,6 +14,7 @@ import { NoteSegmenter, equalRef } from '../audio/segment';
 import { pitchTracker } from '../audio/pitchTracker';
 import { midiName } from '../audio/notes';
 import { LivePitch } from '../components/LivePitch';
+import { tolFor, toneOf, TOLERANCES, type Tolerance, type ToleranceId } from '../score/tolerance';
 import { centsText } from '../components/CentsGauge';
 import { NumField } from '../components/NumField';
 import { usePieces } from '../state/usePieces';
@@ -59,9 +60,9 @@ function useScoreFile(id: number | null): ScoreFile | null | undefined {
 }
 
 const COLOR = { good: '#15803d', warn: '#ca8a04', bad: '#dc2626', wrong: '#7c3aed', missed: '#9ca3af' };
-const colorFor = (r: Scored) => r.status === 'missed' ? COLOR.missed : r.status === 'wrong' ? COLOR.wrong
-  : Math.abs(r.cents!) <= 10 ? COLOR.good : Math.abs(r.cents!) <= 20 ? COLOR.warn : COLOR.bad;
-const tone = (c: number | null) => (c === null ? '' : c <= 10 ? 'good' : c <= 20 ? 'warn' : 'bad');
+const colorWith = (r: Scored, t: Tolerance) => r.status === 'missed' ? COLOR.missed : r.status === 'wrong' ? COLOR.wrong
+  : COLOR[toneOf(r.cents!, t)];
+const toneWith = (c: number | null, t: Tolerance) => (c === null ? '' : toneOf(c, t));
 
 export function Score() {
   const scores = useScores();
@@ -205,7 +206,10 @@ export function Score() {
 }
 
 function ScoreView({ score, onClose, initial }: { score: ScoreFile; onClose: () => void; initial?: ScoreOpenRequest }) {
-  const { settings } = useSettings();
+  const { settings, update: updateSettings } = useSettings();
+  const tol = tolFor(settings.pitchTolerance);
+  const colorFor = (r: Scored) => colorWith(r, tol);
+  const tone = (c: number | null) => toneWith(c, tol);
   const pieces = usePieces();
   const piece = pieces.find((p) => p.id === score.pieceId);
   const myPart = score.part ?? 0;
@@ -401,7 +405,7 @@ function ScoreView({ score, onClose, initial }: { score: ScoreFile; onClose: () 
     for (const r of result) {
       const key = `${r.note.measure}:${r.note.index}`;
       let up: boolean, label: string;
-      if (r.status === 'ok' && r.cents !== null && Math.abs(r.cents) >= 10) { up = r.cents > 0; label = `${Math.round(Math.abs(r.cents))}`; }
+      if (r.status === 'ok' && r.cents !== null && Math.abs(r.cents) > tol.good) { up = r.cents > 0; label = `${Math.round(Math.abs(r.cents))}`; }
       else if (r.status === 'wrong' && r.playedMidi !== null && r.playedMidi !== r.note.midi) { up = r.playedMidi > r.note.midi; label = midiName(r.playedMidi); }
       else continue;
       const rc = noteRect(key);
@@ -890,7 +894,7 @@ function ScoreView({ score, onClose, initial }: { score: ScoreFile; onClose: () 
         ) : (
           <>
             <div className="rec-live"><span className="rec-dot" /> {recorder.recording ? '녹음 · ' : ''}듣는 중 · {liveDone}/{expected.length}음</div>
-            {livePitch && <div className="live-pitch-row"><span className="muted small">지금 내는 음</span> <LivePitch a4={settings.a4} /></div>}
+            {livePitch && <div className="live-pitch-row"><span className="muted small">지금 내는 음</span> <LivePitch a4={settings.a4} tol={tol} /></div>}
             <div className="progress"><div style={{ width: `${(liveDone / Math.max(1, expected.length)) * 100}%` }} /></div>
             <button className="primary wide big stop" onClick={stop} data-testid="score-stop">■ 끝내고 채점</button>
           </>
@@ -910,13 +914,21 @@ function ScoreView({ score, onClose, initial }: { score: ScoreFile; onClose: () 
           </div>
         )}
         {!listening && (
+          <div className="metro-pick" role="group" aria-label="음정 판정 기준">
+            <span className="small">판정</span>
+            {(['strict', 'normal', 'relaxed'] as ToleranceId[]).map((id) => (
+              <button key={id} type="button" className={`chip ${tol.id === id ? 'on' : ''}`} title={TOLERANCES[id].hint} onClick={() => updateSettings({ pitchTolerance: id })} data-testid={`tol-${id}`}>{TOLERANCES[id].label} ±{TOLERANCES[id].good}/{TOLERANCES[id].warn}</button>
+            ))}
+          </div>
+        )}
+        {!listening && (
           <label className="small"><input type="checkbox" checked={livePitch} onChange={(e) => setLivePitch(e.target.checked)} data-testid="score-live-pitch" /> 연주하는 동안 지금 내는 음 보기 (튜너보다 천천히 움직여요)</label>
         )}
         {!listening && scoreMetro !== 'off' && (
           <p className="hint small">재생 템포 ♩{playBpm}로 한 마디 세고 시작해요. 악보에 지금 칠 음도 따라 표시돼요.{scoreMetro === 'sound' ? ' 이어폰(유선 권장)으로 들으면 녹음에 클릭이 안 들어가요. 스피커로 들어도 채점은 클릭 소리를 빼고 해요.' : ' 소리 없이 아래 점이 박마다 깜빡여요.'}</p>
         )}
         {pitch.error && <p className="error">{pitch.error}</p>}
-        <p className="hint">템포는 상관없어요. 악보 순서대로 연주하면 음을 맞춰 보고, 음표 색으로 보여줘요. 초록 ±10센트 안, 노랑 ±20, 빨강 그 이상, 보라 다른 음, 회색 놓친 음. 음표 옆 ▲는 높게, ▼는 낮게 낸 것(숫자는 센트, 보라는 실제로 낸 음). 박자도 함께 봐요: 내 템포에 맞춰 각 음이 일찍·늦게 들어갔는지.</p>
+        <p className="hint">템포는 상관없어요. 악보 순서대로 연주하면 음을 맞춰 보고, 음표 색으로 보여줘요. 초록 ±{tol.good}센트 안, 노랑 ±{tol.warn}, 빨강 그 이상 (판정 기준 '{tol.label}', 위에서 바꿀 수 있어요 — 지난 기록 색도 같이 바뀌어요), 보라 다른 음, 회색 놓친 음. 음표 옆 ▲는 높게, ▼는 낮게 낸 것(숫자는 센트, 보라는 실제로 낸 음). 박자도 함께 봐요: 내 템포에 맞춰 각 음이 일찍·늦게 들어갔는지.</p>
       </div>
 
       </div>
@@ -986,7 +998,7 @@ function ScoreView({ score, onClose, initial }: { score: ScoreFile; onClose: () 
             <div><b>{sum.meanAbs === null ? '—' : `±${Math.round(sum.meanAbs)}`}</b><span>평균 오차(센트)</span></div>
             <div><b>{sum.wrong + sum.missed}</b><span>다른 음·놓침</span></div>
           </div>
-          <p className="hint small dev-legend"><span style={{ color: COLOR.good }}>●</span> ±10센트 안 · <span style={{ color: COLOR.warn }}>●</span> ±20 · <span style={{ color: COLOR.bad }}>●</span> 그 이상 · <span style={{ color: COLOR.wrong }}>●</span> 다른 음 · <span style={{ color: COLOR.missed }}>●</span> 놓침 — 음표 옆 <b>▲</b> 높게 <b>▼</b> 낮게 (숫자 = 센트)</p>
+          <p className="hint small dev-legend"><span style={{ color: COLOR.good }}>●</span> ±{tol.good}센트 안 · <span style={{ color: COLOR.warn }}>●</span> ±{tol.warn} · <span style={{ color: COLOR.bad }}>●</span> 그 이상 · <span style={{ color: COLOR.wrong }}>●</span> 다른 음 · <span style={{ color: COLOR.missed }}>●</span> 놓침 — 음표 옆 <b>▲</b> 높게 <b>▼</b> 낮게 (숫자 = 센트)</p>
           {rhythm && (
             <div className="stats" data-testid="rhythm-stats">
               <div><b>♩≈{Math.round(rhythm.bpm)}</b><span>내 템포</span></div>
@@ -1128,7 +1140,7 @@ function ScoreView({ score, onClose, initial }: { score: ScoreFile; onClose: () 
           {listening ? (
             <>
               {playing && <span ref={beatDot} className="beat-dot" data-testid="beat-dot" aria-hidden />}
-              {livePitch && <LivePitch a4={settings.a4} compact />}
+              {livePitch && <LivePitch a4={settings.a4} tol={tol} compact />}
               <span className="float-info"><span className="rec-dot" /> {liveDone}/{expected.length}음</span>
               <button className="primary" onClick={stop} data-testid="float-stop-score">■ 끝내고 채점</button>
             </>
@@ -1283,7 +1295,8 @@ function RunHistory({ runs, onPick, onShow, shownId }: { runs: ScoreRun[]; onPic
 
 /** 기록 한 번 요약: 맞은 음, 음정 높낮이 경향, 가장 벗어난 음, 약한 마디 */
 export function RunInsightView({ run }: { run: ScoreRun }) {
-  const ins = run.notes?.length ? runInsight(run.notes as RunNote[]) : null;
+  const { settings } = useSettings();
+  const ins = run.notes?.length ? runInsight(run.notes as RunNote[], tolFor(settings.pitchTolerance).good + 0.001) : null;
   const pct = Math.round((run.ok / Math.max(1, run.total)) * 100);
   return (
     <div className="run-insight" data-testid="run-insight">

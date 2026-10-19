@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { saveBackup, restoreBackup, storageInfo } from '../data/backup';
 import { checkForUpdate } from '../state/appUpdate';
 import { NumField } from './NumField';
+import { TOLERANCES, tolFor, type ToleranceId } from '../score/tolerance';
 
 export function SettingsSheet({ onClose }: { onClose: () => void }) {
   const { settings, update } = useSettings();
@@ -51,6 +52,15 @@ export function SettingsSheet({ onClose }: { onClose: () => void }) {
           <label><input type="checkbox" checked={settings.itemAlert} onChange={(e) => update({ itemAlert: e.target.checked })} data-testid="item-alert-setting" /> 항목 시간 끝 알림 (짧은 소리·진동)</label>
         </div>
 
+        <div className="row-setting col">
+          <span>음정 판정 기준 <small className="muted">(악보 채점 색·지금 내는 음)</small></span>
+          <span className="metro-pick">
+            {(['strict', 'normal', 'relaxed'] as ToleranceId[]).map((id) => (
+              <button key={id} type="button" className={`chip ${tolFor(settings.pitchTolerance).id === id ? 'on' : ''}`} onClick={() => update({ pitchTolerance: id })} data-testid={`set-tol-${id}`}>{TOLERANCES[id].label}</button>
+            ))}
+          </span>
+          <small className="muted">{tolFor(settings.pitchTolerance).hint}. 초록 안이면 맞음, 노랑까지는 거의 맞음, 그 밖은 빨강.</small>
+        </div>
         <div className="row-setting col">
           <span>이어폰 지연 보정 <small className="muted">(블루투스 이어폰은 보통 150~250ms)</small></span>
           <span><NumField value={settings.latencyMs} min={0} max={400} step={10} label="이어폰 지연 보정 ms" width={56} testId="latency" onChange={(v) => update({ latencyMs: v })} /> ms</span>

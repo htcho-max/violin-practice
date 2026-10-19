@@ -374,6 +374,12 @@ try {
     const res = await page.getByTestId('score-result').textContent();
     const pct = Number(res.match(/(\d+)%/)?.[1]);
     ok(pct >= 80, `메트로놈 켜고 채점 맞은 음 ${pct}%`);
+    const legend = () => page.locator('.dev-legend').textContent();
+    ok((await legend()).includes('±10센트'), '판정 기준 보통: 범례 ±10');
+    await page.getByTestId('tol-relaxed').click();
+    await page.waitForTimeout(400);
+    ok((await legend()).includes('±15센트') && (await legend()).includes('±30'), '판정 기준 관대: 범례 ±15/±30');
+    await page.getByTestId('tol-normal').click();
     ok(errors.length === 0, `콘솔 오류 없음 ${errors.join(' | ')}`);
     await browser.close();
   }

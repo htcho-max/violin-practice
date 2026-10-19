@@ -1,4 +1,5 @@
 import type { ClickSound } from '../audio/metronome';
+import type { ToleranceId } from '../score/tolerance';
 
 export interface RoutineItem { key: string; label: string; minutes: number }
 
@@ -18,6 +19,8 @@ export interface Settings {
   latencyMs: number;
   /** 연습 항목 시간이 끝나면 알림 (소리·진동·안내) */
   itemAlert: boolean;
+  /** 음정 판정 기준 (악보 채점 색·지금 내는 음) */
+  pitchTolerance: ToleranceId;
 }
 
 export const DEFAULT_ROUTINE: RoutineItem[] = [
@@ -42,6 +45,7 @@ export const DEFAULT_SETTINGS: Settings = {
   routine: DEFAULT_ROUTINE,
   latencyMs: 0,
   itemAlert: true,
+  pitchTolerance: 'normal',
 };
 
 export function mergeSettings(stored: Partial<Settings> | undefined): Settings {

@@ -2,9 +2,10 @@ import { useEffect, useRef } from 'react';
 import { pitchTracker } from '../audio/pitchTracker';
 import { PitchSmoother } from '../audio/smooth';
 import { midiName } from '../audio/notes';
+import { toneOf, type Tolerance, TOLERANCES } from '../score/tolerance';
 
 /** 악보 연주(채점) 중 지금 내는 음: 음 이름 + 작은 바늘. 화면을 매 프레임 다시 그리지 않고 DOM 만 바꿈 */
-export function LivePitch({ a4, compact = false }: { a4: number; compact?: boolean }) {
+export function LivePitch({ a4, compact = false, tol = TOLERANCES.normal }: { a4: number; compact?: boolean; tol?: Tolerance }) {
   const nameEl = useRef<HTMLSpanElement>(null);
   const centsEl = useRef<HTMLSpanElement>(null);
   const needle = useRef<HTMLSpanElement>(null);
@@ -17,7 +18,7 @@ export function LivePitch({ a4, compact = false }: { a4: number; compact?: boole
     const paint = () => {
       raf = 0;
       const v = latest;
-      const tone = v === null ? 'idle' : Math.abs(v.cents) <= 10 ? 'good' : Math.abs(v.cents) <= 20 ? 'warn' : 'bad';
+      const tone = v === null ? 'idle' : toneOf(v.cents, tol);
       if (box.current) box.current.dataset.tone = tone;
       const name = v === null ? '—' : midiName(v.midi);
       if (name !== shown && nameEl.current) { nameEl.current.textContent = name; shown = name; }
@@ -36,11 +37,11 @@ export function LivePitch({ a4, compact = false }: { a4: number; compact?: boole
       if (!raf) raf = requestAnimationFrame(paint);
     });
     return () => { unsub(); if (raf) cancelAnimationFrame(raf); };
-  }, [a4]);
+  }, [a4, tol]);
   return (
     <span ref={box} className={`live-pitch ${compact ? 'compact' : ''}`} data-tone="idle" data-testid="live-pitch" aria-live="off">
       <span ref={nameEl} className="lp-name">—</span>
-      <span className="lp-bar"><span className="lp-zone" /><span className="lp-mid" /><span ref={needle} className="lp-needle" /></span>
+      <span className="lp-bar"><span className="lp-zone" style={{ left: `${50 - tol.good}%`, width: `${tol.good * 2}%` }} /><span className="lp-mid" /><span ref={needle} className="lp-needle" /></span>
       <span ref={centsEl} className="lp-cents" />
     </span>
   );
