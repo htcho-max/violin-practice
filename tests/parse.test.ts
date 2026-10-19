@@ -58,3 +58,15 @@ describe('연주법', () => {
     expect(noteShape(ev(4)).pizz).toBe(true);
   });
 });
+
+import { drawRangeFor } from '../src/score/osmd';
+describe('OSMD 그리기 구간', () => {
+  it('못갖춘마디 0 이 있으면 순서가 하나 밀림', () => {
+    expect(drawRangeFor([0, 1, 2, 3, 4], 0, 4)).toEqual({ drawFromMeasureNumber: 1, drawUpToMeasureNumber: 5 });
+    expect(drawRangeFor([0, 1, 2, 3, 4], 2, 3)).toEqual({ drawFromMeasureNumber: 3, drawUpToMeasureNumber: 4 });
+  });
+  it('15마디부터 시작하는 악보', () => {
+    expect(drawRangeFor([15, 16, 17, 18], 15, 16)).toEqual({ drawFromMeasureNumber: 1, drawUpToMeasureNumber: 2 });
+    expect(drawRangeFor([15, 16, 17, 18], 17, 99)).toEqual({ drawFromMeasureNumber: 3, drawUpToMeasureNumber: 4 });
+  });
+});

@@ -7,7 +7,7 @@ import { markEmpty, type UserMark, type UserMarks } from '../score/dynamics';
 import { DraftInput } from '../components/DraftInput';
 import { editNote, revertMeasure, shiftMarksAfterRest, type EditOp, type NoteType } from '../score/edit';
 import { alignNotes, summarizeScore, type Played, type Scored } from '../score/align';
-import { createOSMD, colorNotes, noteElements, showParts, paintNotes } from '../score/osmd';
+import { createOSMD, colorNotes, noteElements, showParts, paintNotes, setDrawRange } from '../score/osmd';
 import { planPlayback, scorePlayer, slicePlan, instFor, type Voice, type AccPart } from '../score/player';
 import { analyzeRhythm, rhythmTone } from '../score/rhythm';
 import { NoteSegmenter, equalRef } from '../audio/segment';
@@ -480,7 +480,7 @@ function ScoreView({ score, onClose, initial }: { score: ScoreFile; onClose: () 
         await osmdInit.current;
         if (!alive || !osmd.current) return;
         setRendering(true);
-        osmd.current.setOptions({ drawFromMeasureNumber: from, drawUpToMeasureNumber: to });
+        setDrawRange(osmd.current, from, to);
         osmd.current.zoom = zoomView;
         if (parsed.parts.length > 1) showParts(osmd.current, myPart, !!score.showOthers);
         // 색은 그린 뒤 SVG 에 직접 칠함 (채점 결과만 바뀔 때 다시 그리지 않게)

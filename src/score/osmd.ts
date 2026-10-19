@@ -29,6 +29,32 @@ export function showParts(osmd: OpenSheetMusicDisplay, mine: number, others: boo
 }
 
 /**
+ * 그릴 마디 구간 정하기. OSMD 의 drawFrom/UpToMeasureNumber 는 '몇 번째 마디(1부터)' 인데,
+ * 첫 마디가 못갖춘마디면 render() 안에서 다시 '번호'로 바꿔 버려서 어긋난다.
+ * 그래서 악보 마디 번호(0, 15마디부터 시작 등)를 순서로 바꿔 규칙 값을 직접 넣는다.
+ */
+export function setDrawRange(osmd: OpenSheetMusicDisplay, from: number, to: number) {
+  const sms = osmd.Sheet?.SourceMeasures ?? [];
+  const nums = sms.map((sm) => sm.MeasureNumberXML ?? sm.MeasureNumber);
+  const { drawFromMeasureNumber: a1, drawUpToMeasureNumber: b1 } = drawRangeFor(nums, from, to);
+  const a = a1 - 1, b = Math.min(b1, Math.max(1, sms.length)) - 1;
+  const r = osmd.EngravingRules as unknown as { MinMeasureToDrawIndex: number; MaxMeasureToDrawIndex: number; MinMeasureToDrawNumber: number; MaxMeasureToDrawNumber: number };
+  const implicit = !!(sms[0] as unknown as { ImplicitMeasure?: boolean } | undefined)?.ImplicitMeasure;
+  r.MinMeasureToDrawIndex = a; r.MaxMeasureToDrawIndex = b;
+  // 못갖춘마디로 시작하면 OSMD 가 Number 로 Index 를 덮어쓰므로 같은 값을 넣어 둠
+  r.MinMeasureToDrawNumber = implicit ? a : a + 1;
+  r.MaxMeasureToDrawNumber = implicit ? b : b + 1;
+}
+/** 마디 번호 목록에서 from~to 를 덮는 1부터의 순서 (없는 번호면 가장 가까운 쪽) */
+export function drawRangeFor(nums: number[], from: number, to: number): { drawFromMeasureNumber: number; drawUpToMeasureNumber: number } {
+  if (!nums.length) return { drawFromMeasureNumber: 1, drawUpToMeasureNumber: Number.MAX_SAFE_INTEGER };
+  let a = nums.findIndex((n) => n >= from); if (a < 0) a = nums.length - 1;
+  let b = -1; for (let i = nums.length - 1; i >= 0; i--) if (nums[i] <= to) { b = i; break; }
+  if (b < a) b = a;
+  return { drawFromMeasureNumber: a + 1, drawUpToMeasureNumber: b + 1 };
+}
+
+/**
  * 채점 결과로 음표 머리 색칠. colors: "마디:순서" → 색 (parse.ts 와 같은 순서: 내 파트 1성부, 꾸밈음·쉼표·붙임줄 뒤 음 제외, 화음은 하나로)
  * 빈 맵이면 색을 지움. 붙임줄 뒤 음은 앞 음과 같은 색.
  */
