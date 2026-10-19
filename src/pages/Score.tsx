@@ -384,6 +384,25 @@ function ScoreView({ score, onClose, initial }: { score: ScoreFile; onClose: () 
     }
     setMarkPos(out);
   }, [renderTick, score.marks]); // eslint-disable-line react-hooks/exhaustive-deps
+  // 채점 결과: 높았는지 낮았는지 음표 옆에 ▲/▼ (±10센트 넘은 음, 다른 음은 낸 음 이름)
+  const [devPos, setDevPos] = useState<{ key: string; x: number; y: number; up: boolean; label: string; color: string }[]>([]);
+  useEffect(() => {
+    const wrap = sheetWrap.current;
+    if (!wrap || !result || view !== 'pitch') { setDevPos([]); return; }
+    const base = wrap.getBoundingClientRect();
+    const out: typeof devPos = [];
+    for (const r of result) {
+      const key = `${r.note.measure}:${r.note.index}`;
+      let up: boolean, label: string;
+      if (r.status === 'ok' && r.cents !== null && Math.abs(r.cents) >= 10) { up = r.cents > 0; label = `${Math.round(Math.abs(r.cents))}`; }
+      else if (r.status === 'wrong' && r.playedMidi !== null && r.playedMidi !== r.note.midi) { up = r.playedMidi > r.note.midi; label = midiName(r.playedMidi); }
+      else continue;
+      const rc = noteRect(key);
+      if (!rc) continue;
+      out.push({ key, x: rc.right - base.left + 1, y: (rc.top + rc.bottom) / 2 - base.top, up, label, color: colorFor(r) });
+    }
+    setDevPos(out);
+  }, [result, view, renderTick]); // eslint-disable-line react-hooks/exhaustive-deps
   // 레슨 노트가 붙은 마디: 첫 음 왼쪽 위에 📝
   const [lessonPos, setLessonPos] = useState<{ m: number; x: number; top: number; n: number }[]>([]);
   useEffect(() => {
@@ -869,7 +888,7 @@ function ScoreView({ score, onClose, initial }: { score: ScoreFile; onClose: () 
           <p className="hint small">재생 템포 ♩{playBpm}로 한 마디 세고 시작해요. 악보에 지금 칠 음도 따라 표시돼요.{scoreMetro === 'sound' ? ' 이어폰(유선 권장)으로 들으면 녹음에 클릭이 안 들어가요. 스피커로 들어도 채점은 클릭 소리를 빼고 해요.' : ' 소리 없이 아래 점이 박마다 깜빡여요.'}</p>
         )}
         {pitch.error && <p className="error">{pitch.error}</p>}
-        <p className="hint">템포는 상관없어요. 악보 순서대로 연주하면 음을 맞춰 보고, 음표 색으로 보여줘요. 초록 ±10센트 안, 노랑 ±20, 빨강 그 이상, 보라 다른 음, 회색 놓친 음. 박자도 함께 봐요: 내 템포에 맞춰 각 음이 일찍·늦게 들어갔는지.</p>
+        <p className="hint">템포는 상관없어요. 악보 순서대로 연주하면 음을 맞춰 보고, 음표 색으로 보여줘요. 초록 ±10센트 안, 노랑 ±20, 빨강 그 이상, 보라 다른 음, 회색 놓친 음. 음표 옆 ▲는 높게, ▼는 낮게 낸 것(숫자는 센트, 보라는 실제로 낸 음). 박자도 함께 봐요: 내 템포에 맞춰 각 음이 일찍·늦게 들어갔는지.</p>
       </div>
 
       </div>
@@ -898,6 +917,9 @@ function ScoreView({ score, onClose, initial }: { score: ScoreFile; onClose: () 
           onClick={(e) => onSheetTap(e.clientX, e.clientY)} data-testid="sheet-wrap">
           <div ref={holder} data-testid="osmd" />
           <div className="mark-layer" aria-hidden>
+            {devPos.map(({ key, x, y, up, label, color }) => (
+              <span key={`d${key}`} className={`dev-tag ${up ? 'up' : 'down'}`} style={{ left: x, top: y, color }} data-testid="dev-tag">{up ? '▲' : '▼'}{label}</span>
+            ))}
             {lessonPos.map(({ m, x, top, n }) => (
               <span key={`l${m}`} className="lesson-pin" style={{ left: x, top }} title={`레슨 노트 ${n}개`} data-testid="lesson-pin">📝{n > 1 ? n : ''}</span>
             ))}
@@ -930,6 +952,7 @@ function ScoreView({ score, onClose, initial }: { score: ScoreFile; onClose: () 
             <div><b>{sum.meanAbs === null ? '—' : `±${Math.round(sum.meanAbs)}`}</b><span>평균 오차(센트)</span></div>
             <div><b>{sum.wrong + sum.missed}</b><span>다른 음·놓침</span></div>
           </div>
+          <p className="hint small dev-legend"><span style={{ color: COLOR.good }}>●</span> ±10센트 안 · <span style={{ color: COLOR.warn }}>●</span> ±20 · <span style={{ color: COLOR.bad }}>●</span> 그 이상 · <span style={{ color: COLOR.wrong }}>●</span> 다른 음 · <span style={{ color: COLOR.missed }}>●</span> 놓침 — 음표 옆 <b>▲</b> 높게 <b>▼</b> 낮게 (숫자 = 센트)</p>
           {rhythm && (
             <div className="stats" data-testid="rhythm-stats">
               <div><b>♩≈{Math.round(rhythm.bpm)}</b><span>내 템포</span></div>

@@ -156,6 +156,9 @@ try {
     const pct = Number(res.match(/(\d+)%/)?.[1]);
     ok(pct >= 80, `채점 결과 맞은 음 ${pct}% (${res.match(/맞은 음 \d+\/\d+/)?.[0]})`);
     ok(/B4\+1[0-4]/.test(res), 'B4 +12센트를 가장 벗어난 음으로 표시');
+    const devs = await page.getByTestId('dev-tag').allTextContents();
+    ok(devs.some((t) => /^▲1[0-4]$/.test(t)), `음표 옆 높낮이 표시 (${devs.join(' ')})`);
+    await page.locator('[data-testid=osmd]').screenshot({ path: 'scripts/shot-dev.png' });
     ok(/녹음/.test(await page.getByTestId('run-saved').textContent().catch(() => '')), '채점하면 연습 기록과 녹음 저장');
     ok(/연습 기록 1번/.test(await page.getByTestId('run-history').textContent().catch(() => '')), '이 악보 연습 기록 표시');
     const colored = await page.locator('[data-testid=osmd] svg path[fill="#ca8a04"], [data-testid=osmd] svg path[fill="#15803d"], [data-testid=osmd] svg [fill="#ca8a04"], [data-testid=osmd] svg [fill="#15803d"]').count();
