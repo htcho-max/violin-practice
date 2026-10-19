@@ -10,6 +10,9 @@ import { useBackLayer } from '../state/back';
 import { useScoreRuns, runText } from '../state/useScoreRuns';
 import { clock } from '../data/dates';
 import { LessonNotesLog } from '../components/LessonNotes';
+import { RunInsightView } from './Score';
+import { requestScore } from '../state/openRequest';
+import type { TabId } from '../components/TabBar';
 
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
 
@@ -23,7 +26,7 @@ function level(sec: number): number {
 
 type View = 'calendar' | 'pieces' | 'recordings';
 
-export function Log() {
+export function Log({ goTab }: { goTab?: (t: TabId) => void } = {}) {
   const [view, setView] = useState<View>(() => { try { return (localStorage.getItem('violin-log-view') as View) || 'calendar'; } catch { return 'calendar'; } });
   const go = (v: View) => { setView(v); try { localStorage.setItem('violin-log-view', v); } catch { /* 무시 */ } };
   useBackLayer(view !== 'calendar', () => go('calendar'));
@@ -34,14 +37,14 @@ export function Log() {
         <button className={view === 'pieces' ? 'on' : ''} onClick={() => go('pieces')}>곡</button>
         <button className={view === 'recordings' ? 'on' : ''} onClick={() => go('recordings')}>녹음</button>
       </div>
-      {view === 'calendar' && <><Calendar /><LessonNotesLog /></>}
+      {view === 'calendar' && <><Calendar goTab={goTab} /><LessonNotesLog /></>}
       {view === 'pieces' && <Pieces />}
       {view === 'recordings' && <Recordings />}
     </section>
   );
 }
 
-function Calendar() {
+function Calendar({ goTab }: { goTab?: (t: TabId) => void }) {
   const sessions = useSessions();
   const runs = useScoreRuns();
   const [openRun, setOpenRun] = useState<number | null>(null);
@@ -136,7 +139,8 @@ function Calendar() {
                   </div>
                   {openRun === r.id && (
                     <div className="rec-body">
-                      {r.weakMeasures?.length ? <p className="small">가장 벗어난 마디: {r.weakMeasures.join(', ')}</p> : null}
+                      <RunInsightView run={r} />
+                      {r.notes?.length && goTab ? <button className="secondary wide" onClick={() => { requestScore({ scoreId: r.scoreId, runId: r.id }); goTab('score'); }} data-testid="log-run-show">📊 악보에서 분석 보기</button> : null}
                       {r.recordingId ? <RecPlayerById id={r.recordingId} /> : <p className="muted small">녹음 없이 채점만 했어요.</p>}
                     </div>
                   )}

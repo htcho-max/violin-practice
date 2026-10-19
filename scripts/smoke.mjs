@@ -161,6 +161,14 @@ try {
     await page.locator('[data-testid=osmd]').screenshot({ path: 'scripts/shot-dev.png' });
     ok(/녹음/.test(await page.getByTestId('run-saved').textContent().catch(() => '')), '채점하면 연습 기록과 녹음 저장');
     ok(/연습 기록 1번/.test(await page.getByTestId('run-history').textContent().catch(() => '')), '이 악보 연습 기록 표시');
+    await page.getByTestId('score-result').locator('button').first().waitFor().catch(() => {});
+    await page.getByTestId('run-history').locator('.rec-title').first().click();
+    await page.waitForTimeout(300);
+    ok(/맞은 음/.test(await page.getByTestId('run-insight').first().textContent().catch(() => '')), '연습 기록 누르면 분석 요약');
+    await page.getByTestId('run-show').first().click();
+    await page.waitForTimeout(800);
+    ok(await seen(page.getByTestId('past-run')), '지난 기록을 악보에서 다시 보기');
+    ok((await page.getByTestId('dev-tag').count()) > 0, '지난 기록에도 높낮이 표시');
     const colored = await page.locator('[data-testid=osmd] svg path[fill="#ca8a04"], [data-testid=osmd] svg path[fill="#15803d"], [data-testid=osmd] svg [fill="#ca8a04"], [data-testid=osmd] svg [fill="#15803d"]').count();
     ok(colored > 0, `음표 머리 색칠 (${colored})`);
     ok(await seen(page.getByTestId('rhythm-stats')), `박자 채점 표시 (${(await page.getByTestId('rhythm-stats').textContent().catch(() => '')).trim()})`);
@@ -260,12 +268,18 @@ try {
     await page.locator('.log .segmented').getByRole('button', { name: '연습 기록' }).click();
     ok(await seen(page.getByTestId('day-runs')), '달력 오늘 칸에 악보 연습 기록');
     await page.getByTestId('day-runs').locator('.rec-title').first().click();
+    ok(await seen(page.getByTestId('log-run-show')), '기록 화면에서 악보 분석 보기 버튼');
     ok(await seen(page.getByTestId('day-runs').locator('audio')), '연습 기록에서 녹음 재생');
     await page.screenshot({ path: 'scripts/shot-runs.png', fullPage: true });
     await page.locator('.log .segmented').first().getByRole('button', { name: '녹음' }).click();
     await page.getByTestId('rec-filter').getByRole('button', { name: '악보 연습' }).click();
     await page.locator('.rec-list .rec-title').first().click();
     ok(/악보 채점: 1~2마디/.test(await page.getByTestId('rec-run').textContent().catch(() => '')), '녹음 목록에 악보 채점 결과 연동');
+    await page.locator('.log .segmented').first().getByRole('button', { name: '연습 기록' }).click();
+    await page.getByTestId('day-runs').locator('.rec-title').first().click();
+    await page.getByTestId('log-run-show').click();
+    await page.waitForTimeout(2500);
+    ok(await seen(page.getByTestId('past-run')), '기록 화면에서 눌러 악보로 가서 분석 보기');
     ok(errors.length === 0, `콘솔 오류 없음 ${errors.join(' | ')}`);
     await browser.close();
   }

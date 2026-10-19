@@ -100,6 +100,34 @@ describe('셈여림 비교', () => {
     expect(meanDb(tr, 1, 1.6)).toBeCloseTo(-15);
     expect(meanDb(tr, 5, 6)).toBeNull();
     const rn = toRunNotes([sc(3, 0.5, -21.234), { ...sc(4, 0.5, null), status: 'wrong', cents: null }]);
-    expect(rn).toEqual([[3, 0, 69, 0, 0, -21.2], [4, 0, 69, null, 1, null]]);
+    expect(rn.map((x) => x.slice(0, 6))).toEqual([[3, 0, 69, 0, 0, -21.2], [4, 0, 69, null, 1, null]]);
+  });
+});
+
+import { fromRunNotes, runInsight } from '../src/score/practice';
+import type { ParsedScore } from '../src/score/parse';
+describe('기록 다시 보기', () => {
+  const parsed = { title: '', measures: [1], notes: [
+    { measure: 1, index: 0, midi: 69, beat: 0, dur: 1 }, { measure: 1, index: 1, midi: 71, beat: 1, dur: 1 },
+    { measure: 1, index: 2, midi: 73, beat: 2, dur: 1 }, { measure: 1, index: 3, midi: 74, beat: 3, dur: 1 }],
+    measureLen: new Map([[1, 4]]), time: [4, 4] as [number, number], parts: [] };
+  const rs = [
+    { note: parsed.notes[0], status: 'ok' as const, cents: 3, playedMidi: 69, playedStart: 10, db: -20 },
+    { note: parsed.notes[1], status: 'ok' as const, cents: 14, playedMidi: 71, playedStart: 10.5, db: -18 },
+    { note: parsed.notes[2], status: 'wrong' as const, cents: null, playedMidi: 74, playedStart: 11, db: -19 },
+    { note: parsed.notes[3], status: 'missed' as const, cents: null, playedMidi: null },
+  ];
+  it('저장했다가 되살리면 색·높낮이·박자 정보가 그대로', () => {
+    const back = fromRunNotes(toRunNotes(rs), parsed as unknown as ParsedScore);
+    expect(back.map((r) => r.status)).toEqual(['ok', 'ok', 'wrong', 'missed']);
+    expect(back[1].cents).toBe(14);
+    expect(back[2].playedMidi).toBe(74);
+    expect(back.map((r) => r.playedStart)).toEqual([0, 0.5, 1, null]);
+    expect(back[0].note).toBe(parsed.notes[0]);
+  });
+  it('요약: 높게·낮게 낸 음', () => {
+    const i = runInsight(toRunNotes(rs));
+    expect(i).toMatchObject({ sharp: 1, flat: 0, inTune: 1, wrong: 1, missed: 1 });
+    expect(i.worst[0]).toEqual({ measure: 1, midi: 71, cents: 14 });
   });
 });

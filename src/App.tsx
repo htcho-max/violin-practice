@@ -45,7 +45,7 @@ export function App({ updatedFrom = null }: { updatedFrom?: string | null }) {
             {tab === 'metronome' && <Metronome />}
             {tab === 'drone' && <Drone />}
             {tab === 'score' && <Score />}
-            {tab === 'log' && <Log />}
+            {tab === 'log' && <Log goTab={go} />}
           </>
         )}
       </main>

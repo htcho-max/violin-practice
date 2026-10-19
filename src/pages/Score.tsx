@@ -24,6 +24,7 @@ import { useBackLayer } from '../state/back';
 import { recorder } from '../audio/recorder';
 import { localDate, clock } from '../data/dates';
 import { useScoreRuns, runText } from '../state/useScoreRuns';
+import { fromRunNotes, runInsight, type RunNote } from '../score/practice';
 import type { ScoreRun, Recording } from '../data/db';
 import { Exercises, createExercise, createBow, loadOpts, recordProgress, takePending } from './Exercises';
 import { BOW_VARIANTS } from '../exercise/bow';
@@ -250,6 +251,9 @@ function ScoreView({ score, onClose, initial }: { score: ScoreFile; onClose: () 
   const played = useRef<Played[]>([]);
   const [, tick] = useState(0);
   const [result, setResult] = useState<Scored[] | null>(null);
+  /** 지난 연습 기록을 다시 보는 중이면 그 기록 */
+  const [pastRun, setPastRun] = useState<ScoreRun | null>(null);
+  const resultCard = useRef<HTMLDivElement>(null);
   const els = useRef<Map<string, string[]>>(new Map());
   const lit = useRef<SVGGElement[]>([]);
   const litKey = useRef<string | null>(null);
@@ -616,6 +620,7 @@ function ScoreView({ score, onClose, initial }: { score: ScoreFile; onClose: () 
   function restartPlay() { setPausedAt(null); curIdx.current = 0; playRange(); }
 
   async function start() {
+    setPastRun(null);
     if (listeningRef.current) return;
     if (playing || pausedAt !== null) stopPlay();
     setResult(null);
@@ -716,7 +721,7 @@ function ScoreView({ score, onClose, initial }: { score: ScoreFile; onClose: () 
     if (playingRef.current || pausedAt !== null) stopPlay();
     const A = Math.max(first, Math.min(last, a)), B = Math.max(A, Math.min(last, b));
     if (drillRef.current && (A !== drillRef.current.from || B !== drillRef.current.to)) { setDrill(null); setDrillMsg(null); }
-    setFrom(A); setTo(B); setResult(null);
+    setFrom(A); setTo(B); setResult(null); setPastRun(null);
   };
   const span = to - from + 1;
   const shiftSet = useMemo(() => new Set(ex?.shiftKeys ?? []), [ex]);
@@ -755,6 +760,22 @@ function ScoreView({ score, onClose, initial }: { score: ScoreFile; onClose: () 
     setPlayBpm(ladderBpm(l));
   }
   function endDrill() { setDrill(null); setDrillMsg(null); }
+  /** 지난 기록의 분석을 악보에 다시 보이기 (음마다 저장된 기록만) */
+  function showRun(r: ScoreRun) {
+    if (!r.notes?.length || listeningRef.current) return;
+    setRange(r.from, r.to);
+    setResult(fromRunNotes(r.notes, parsed));
+    setPastRun(r);
+    setView('pitch');
+    setTimeout(() => resultCard.current?.scrollIntoView?.({ block: 'start', behavior: 'smooth' }), 200);
+  }
+  const runShown = useRef(false);
+  useEffect(() => {
+    if (runShown.current || !initial?.runId || !runs.length) return;
+    const r = runs.find((x) => x.id === initial.runId);
+    runShown.current = true;
+    if (r) showRun(r);
+  }, [runs]); // eslint-disable-line react-hooks/exhaustive-deps
   // 다른 화면에서 열 때: 그 마디로 (집중 연습이면 바로 준비)
   const initDone = useRef(false);
   useEffect(() => {
@@ -946,7 +967,13 @@ function ScoreView({ score, onClose, initial }: { score: ScoreFile; onClose: () 
 
       <div className="score-bottom">
       {sum && (
-        <div className="card" data-testid="score-result">
+        <div className="card" data-testid="score-result" ref={resultCard}>
+          {pastRun && (
+            <div className="past-run" data-testid="past-run">
+              <span>📊 {new Date(pastRun.createdAt).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })} 연습 기록을 보고 있어요 ({pastRun.from}~{pastRun.to}마디{pastRun.bpm ? ` · ♩≈${pastRun.bpm}` : ''})</span>
+              <button className="mini" onClick={() => { setResult(null); setPastRun(null); }}>닫기</button>
+            </div>
+          )}
           <div className="stats">
             <div><b>{Math.round((sum.ok / Math.max(1, sum.total)) * 100)}%</b><span>맞은 음 {sum.ok}/{sum.total}</span></div>
             <div><b>{sum.meanAbs === null ? '—' : `±${Math.round(sum.meanAbs)}`}</b><span>평균 오차(센트)</span></div>
@@ -1036,7 +1063,7 @@ function ScoreView({ score, onClose, initial }: { score: ScoreFile; onClose: () 
           <p className="hint">느린 템포(60%)부터 통과할 때마다 10%씩 올려 원래 템포까지 가요.</p>
         </div>
       )}
-      <RunHistory runs={runs} onPick={(r) => setRange(r.from, r.to)} />
+      <RunHistory runs={runs} onPick={(r) => setRange(r.from, r.to)} onShow={showRun} shownId={pastRun?.id} />
       <ScoreProgress runs={runs} from={from} to={to} />
       {!ex && <LessonNotesCard scoreId={score.id!} scoreTitle={score.title} pieceId={score.pieceId} measure={from} onMeasure={(m) => setRange(m, m + (lenLock ?? span) - 1)} />}
       <div className="card" data-testid="acc-card">
@@ -1210,7 +1237,7 @@ function RecPlayer({ id }: { id: number }) {
 }
 
 /** 이 악보의 연습 기록 (최근 순) */
-function RunHistory({ runs, onPick }: { runs: ScoreRun[]; onPick: (r: ScoreRun) => void }) {
+function RunHistory({ runs, onPick, onShow, shownId }: { runs: ScoreRun[]; onPick: (r: ScoreRun) => void; onShow: (r: ScoreRun) => void; shownId?: number }) {
   const [open, setOpen] = useState<number | null>(null);
   const [all, setAll] = useState(false);
   if (!runs.length) return null;
@@ -1231,7 +1258,10 @@ function RunHistory({ runs, onPick }: { runs: ScoreRun[]; onPick: (r: ScoreRun) 
             </div>
             {open === r.id && (
               <div className="rec-body">
-                {r.weakMeasures?.length ? <p className="small">가장 벗어난 마디: {r.weakMeasures.join(', ')}</p> : null}
+                <RunInsightView run={r} />
+                {r.notes?.length
+                  ? <button className={`secondary wide ${shownId === r.id ? 'on' : ''}`} onClick={() => onShow(r)} data-testid="run-show">📊 악보에서 분석 보기 (음표 색·높낮이·박자{r.notes.some((n) => n[5] != null) ? '·셈여림' : ''})</button>
+                  : <p className="muted small">이 기록은 음마다 저장하기 전(v0.13 이전) 기록이라 요약만 있어요.</p>}
                 {r.recordingId ? <RecPlayer id={r.recordingId} /> : <p className="muted small">녹음 없이 채점만 했어요.</p>}
               </div>
             )}
@@ -1239,6 +1269,25 @@ function RunHistory({ runs, onPick }: { runs: ScoreRun[]; onPick: (r: ScoreRun) 
         ))}
       </ul>
       {runs.length > 5 && <button className="link small" onClick={() => setAll(!all)}>{all ? '접기' : `전체 ${runs.length}개 보기`}</button>}
+    </div>
+  );
+}
+
+/** 기록 한 번 요약: 맞은 음, 음정 높낮이 경향, 가장 벗어난 음, 약한 마디 */
+export function RunInsightView({ run }: { run: ScoreRun }) {
+  const ins = run.notes?.length ? runInsight(run.notes as RunNote[]) : null;
+  const pct = Math.round((run.ok / Math.max(1, run.total)) * 100);
+  return (
+    <div className="run-insight" data-testid="run-insight">
+      <p className="small"><b>{pct}%</b> 맞은 음 {run.ok}/{run.total}{run.meanAbs !== null ? ` · 평균 ±${Math.round(run.meanAbs)}센트` : ''}{run.rhythmMs != null ? ` · 박자 ±${Math.round(run.rhythmMs)}ms` : ''}{run.bpm ? ` · 내 템포 ♩≈${run.bpm}` : ''}</p>
+      {ins && (ins.sharp + ins.flat > 0) && (
+        <p className="small">음정: <b className="sharp">▲ 높게 {ins.sharp}음</b> · <b className="flat">▼ 낮게 {ins.flat}음</b> · 정확 {ins.inTune}음{ins.sharp + ins.flat >= 4 ? ` — ${ins.sharp > ins.flat * 1.5 ? '전체로 높게 짚는 편이에요' : ins.flat > ins.sharp * 1.5 ? '전체로 낮게 짚는 편이에요' : '높고 낮음이 섞여 있어요'}` : ''}</p>
+      )}
+      {ins && ins.worst.length > 0 && (
+        <p className="small">가장 벗어난 음: {ins.worst.map((w) => `${w.measure}마디 ${midiName(w.midi)} ${w.cents > 0 ? '▲' : '▼'}${Math.abs(w.cents)}`).join(' · ')}</p>
+      )}
+      {(run.wrong > 0 || run.missed > 0) && <p className="small">다른 음 {run.wrong} · 놓친 음 {run.missed}</p>}
+      {run.weakMeasures?.length ? <p className="small">가장 벗어난 마디: {run.weakMeasures.join(', ')}</p> : null}
     </div>
   );
 }

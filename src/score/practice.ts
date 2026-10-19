@@ -1,18 +1,58 @@
 /** 연습 기록을 다음 연습으로 잇는 계산들 (화면 없이 순수 함수): 약한 마디, 템포 사다리, 음정 습관, 셈여림 비교 */
 import type { ScoreRun } from '../data/db';
 import type { Scored } from './align';
+import type { ParsedScore, ScoreNote } from './parse';
 
-/** 채점 결과 한 음 (기록용으로 짧게): [마디, 순서, midi, 센트(정수)|null, 0 맞음·1 다른 음·2 놓침, 소리 크기 dB|null] */
-export type RunNote = [number, number, number, number | null, 0 | 1 | 2, number | null];
+/** 채점 결과 한 음 (기록용으로 짧게): [마디, 순서, midi, 센트(정수)|null, 0 맞음·1 다른 음·2 놓침, 소리 크기 dB|null,
+ *  (0.13.3부터) 연주 시작 시각(초, 첫 음 기준)|null, 다른 음이면 실제로 낸 midi|null] */
+export type RunNote = [number, number, number, number | null, 0 | 1 | 2, number | null, (number | null)?, (number | null)?];
 export const RUN_NOTES_MAX = 600;
 
 export function toRunNotes(rs: Scored[]): RunNote[] {
+  const t0 = rs.find((r) => r.playedStart != null)?.playedStart ?? null;
   return rs.slice(0, RUN_NOTES_MAX).map((r) => [
     r.note.measure, r.note.index, r.note.midi,
     r.status === 'ok' && r.cents !== null ? Math.round(r.cents) : null,
     r.status === 'ok' ? 0 : r.status === 'wrong' ? 1 : 2,
     r.db === undefined || r.db === null ? null : Math.round(r.db * 10) / 10,
+    r.playedStart != null && t0 !== null ? Math.round((r.playedStart - t0) * 1000) / 1000 : null,
+    r.status === 'wrong' ? r.playedMidi : null,
   ]);
+}
+
+/** 저장된 기록을 채점 결과 모양으로 되살리기 (악보 색칠·박자·셈여림 보기에 그대로 씀).
+ *  악보를 고쳐서 음이 없어졌으면 그 음은 뺌. */
+export function fromRunNotes(notes: RunNote[], parsed: ParsedScore): Scored[] {
+  const byKey = new Map<string, ScoreNote>(parsed.notes.map((n) => [`${n.measure}:${n.index}`, n]));
+  const out: Scored[] = [];
+  for (const [m, i, midi, cents, st, db, start, played] of notes) {
+    const note = byKey.get(`${m}:${i}`) ?? { measure: m, index: i, midi, beat: 0, dur: 0 };
+    out.push({
+      note: note.midi === midi ? note : { ...note, midi },
+      status: st === 0 ? 'ok' : st === 1 ? 'wrong' : 'missed',
+      cents: st === 0 ? cents : null,
+      playedMidi: st === 0 ? midi : st === 1 ? (played ?? null) : null,
+      playedStart: start ?? null,
+      db,
+    });
+  }
+  return out;
+}
+
+/** 기록 한 번의 음정 경향: 높게·낮게 낸 음 수, 가장 벗어난 음 */
+export interface RunInsight { sharp: number; flat: number; inTune: number; wrong: number; missed: number; worst: { measure: number; midi: number; cents: number }[] }
+export function runInsight(notes: RunNote[], threshold = 10): RunInsight {
+  let sharp = 0, flat = 0, inTune = 0, wrong = 0, missed = 0;
+  const offs: { measure: number; midi: number; cents: number }[] = [];
+  for (const [m, , midi, cents, st] of notes) {
+    if (st === 1) { wrong++; continue; }
+    if (st === 2) { missed++; continue; }
+    if (cents === null) continue;
+    if (cents >= threshold) sharp++; else if (cents <= -threshold) flat++; else inTune++;
+    offs.push({ measure: m, midi, cents });
+  }
+  offs.sort((a, b) => Math.abs(b.cents) - Math.abs(a.cents));
+  return { sharp, flat, inTune, wrong, missed, worst: offs.filter((o) => Math.abs(o.cents) >= threshold).slice(0, 3) };
 }
 
 // ── 약한 마디 ──

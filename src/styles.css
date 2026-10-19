@@ -399,3 +399,9 @@ button.mini.on { border-color: var(--accent); color: var(--accent); font-weight:
 .dev-tag.up { transform: translateY(-110%); }
 .dev-tag.down { transform: translateY(10%); }
 .dev-legend b { font-size: 11px; }
+
+/* 지난 기록 다시 보기 */
+.past-run { display: flex; align-items: center; justify-content: space-between; gap: 8px; background: color-mix(in srgb, var(--accent, #b85a12) 12%, transparent); border-radius: 8px; padding: 6px 10px; margin-bottom: 8px; font-size: 13px; }
+.run-insight p { margin: 4px 0; }
+.run-insight .sharp { color: #dc2626; }
+.run-insight .flat { color: #2563eb; }
