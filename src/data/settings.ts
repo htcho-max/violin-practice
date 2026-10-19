@@ -14,6 +14,10 @@ export interface Settings {
   accent: boolean;
   droneVolume: number;
   routine: RoutineItem[];
+  /** 이어폰 지연 보정 (ms) */
+  latencyMs: number;
+  /** 연습 항목 시간이 끝나면 알림 (소리·진동·안내) */
+  itemAlert: boolean;
 }
 
 export const DEFAULT_ROUTINE: RoutineItem[] = [
@@ -36,6 +40,8 @@ export const DEFAULT_SETTINGS: Settings = {
   accent: true,
   droneVolume: 0.3,
   routine: DEFAULT_ROUTINE,
+  latencyMs: 0,
+  itemAlert: true,
 };
 
 export function mergeSettings(stored: Partial<Settings> | undefined): Settings {

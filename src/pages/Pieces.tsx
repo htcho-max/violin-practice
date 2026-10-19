@@ -1,3 +1,4 @@
+import { useToday } from '../state/useToday';
 import { NumField } from '../components/NumField';
 import { DraftInput } from '../components/DraftInput';
 import { useState } from 'react';
@@ -53,7 +54,7 @@ function PieceRow({ p, today }: { p: Piece; today: string }) {
 
 export function Pieces() {
   const pieces = usePieces();
-  const today = localDate();
+  const today = useToday();
   const [title, setTitle] = useState('');
   const [book, setBook] = useState(4);
   const [filter, setFilter] = useState<PieceStatus | 'all'>('all');

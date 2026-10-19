@@ -1,3 +1,4 @@
+import { useToday } from '../state/useToday';
 import { useMemo, useState } from 'react';
 import { useSessions } from '../state/useSessions';
 import { usePieces } from '../state/usePieces';
@@ -8,6 +9,7 @@ import { Recordings, RecPlayerById } from './Recordings';
 import { useBackLayer } from '../state/back';
 import { useScoreRuns, runText } from '../state/useScoreRuns';
 import { clock } from '../data/dates';
+import { LessonNotesLog } from '../components/LessonNotes';
 
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
 
@@ -32,7 +34,7 @@ export function Log() {
         <button className={view === 'pieces' ? 'on' : ''} onClick={() => go('pieces')}>곡</button>
         <button className={view === 'recordings' ? 'on' : ''} onClick={() => go('recordings')}>녹음</button>
       </div>
-      {view === 'calendar' && <Calendar />}
+      {view === 'calendar' && <><Calendar /><LessonNotesLog /></>}
       {view === 'pieces' && <Pieces />}
       {view === 'recordings' && <Recordings />}
     </section>
@@ -45,7 +47,7 @@ function Calendar() {
   const [openRun, setOpenRun] = useState<number | null>(null);
   const pieces = usePieces();
   const pieceName = (id: string) => pieces.find((p) => p.id === id)?.title;
-  const today = localDate();
+  const today = useToday();
   const [month, setMonth] = useState(() => today.slice(0, 7)); // YYYY-MM
   const [selected, setSelected] = useState(today);
 

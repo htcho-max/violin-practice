@@ -4,6 +4,29 @@ import { useWakeLock } from './wakeLock';
 import { db } from '../data/db';
 import { localDate } from '../data/dates';
 import type { RoutineItem } from '../data/settings';
+import { getAudioContext } from '../audio/context';
+import { recorder } from '../audio/recorder';
+import { pitchTracker } from '../audio/pitchTracker';
+import { scorePlayer } from '../score/player';
+
+/** 녹음·채점·재생·마이크를 쓰는 중 (알림 소리를 내면 섞임) */
+function alertBusy(): boolean {
+  return recorder.recording || scorePlayer.playing || pitchTracker.running;
+}
+/** 부드러운 두 음 알림 소리 */
+function playChime() {
+  try {
+    const ctx = getAudioContext();
+    if (ctx.state === 'suspended') void ctx.resume();
+    const t = ctx.currentTime + 0.05;
+    [[1318.5, 0], [1760, 0.18]].forEach(([f, d]) => {
+      const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = f;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0, t + d); g.gain.linearRampToValueAtTime(0.18, t + d + 0.02); g.gain.exponentialRampToValueAtTime(0.0005, t + d + 0.9);
+      o.connect(g).connect(ctx.destination); o.start(t + d); o.stop(t + d + 1);
+    });
+  } catch { /* 소리 못 내도 괜찮음 */ }
+}
 
 export interface ActiveSession {
   startedAt: number;
@@ -14,6 +37,8 @@ export interface ActiveSession {
   pieces?: Record<string, string>; // 루틴 항목 → 곡 id
   /** 앱이 마지막으로 살아 있던 시각 (앱이 닫힌 동안 시간이 계속 쌓이지 않게) */
   lastSeen?: number;
+  /** 시간 끝 알림을 이미 한 항목 번호 */
+  alerted?: number[];
 }
 /** 이만큼 넘게 앱이 꺼져 있었으면 그때 멈춘 것으로 */
 const STALE_MS = 3 * 60 * 1000;
@@ -38,6 +63,15 @@ export function itemMs(s: ActiveSession, i: number, now: number): number {
 }
 export function totalMs(s: ActiveSession, now: number): number {
   return s.accum.reduce((a, _, i) => a + itemMs(s, i, now), 0);
+}
+
+/** 지금 항목이 정한 시간을 다 채웠는데 아직 알리지 않았으면 그 항목 번호 */
+export function dueAlert(s: ActiveSession | null, now: number): number | null {
+  if (!s || s.runningSince === null) return null;
+  const it = s.items[s.index];
+  if (!it || !(it.minutes > 0)) return null;
+  if (s.alerted?.includes(s.index)) return null;
+  return itemMs(s, s.index, now) >= it.minutes * 60_000 ? s.index : null;
 }
 
 /** 순수 상태 전이 (테스트용으로 export) */
@@ -71,6 +105,9 @@ interface Ctx {
   finish: (memo?: string) => Promise<void>;
   discard: () => void;
   setPiece: (itemKey: string, pieceId: string | null) => void;
+  /** 시간이 끝난 항목 알림 (안내 띠) */
+  alert: number | null;
+  dismissAlert: () => void;
 }
 const SessionContext = createContext<Ctx | null>(null);
 
@@ -108,12 +145,37 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const { settings } = useSettings();
   useWakeLock(!!session && session.runningSince !== null, settings.wakeLock);
   const saving = useRef(false);
+  // 항목 시간 끝 알림
+  const [alert, setAlert] = useState<number | null>(null);
+  const chimePending = useRef(false);
+  useEffect(() => {
+    if (!settings.itemAlert) return;
+    const due = dueAlert(session, now);
+    if (due === null) return;
+    setSession((s) => (s ? { ...s, alerted: [...(s.alerted ?? []), due] } : s));
+    setAlert(due);
+    try { navigator.vibrate?.([200, 100, 200]); } catch { /* 무시 */ }
+    chimePending.current = true;
+  }, [now, session, settings.itemAlert]);
+  // 소리는 녹음·채점·재생·마이크를 쓰지 않을 때만 (쓰는 중이면 끝날 때까지 미룸)
+  useEffect(() => {
+    if (!chimePending.current) return;
+    if (alertBusy()) return;
+    chimePending.current = false;
+    playChime();
+  }, [now, alert]);
+  useEffect(() => {
+    if (!chimePending.current) return;
+    const id = setInterval(() => { if (chimePending.current && !alertBusy()) { chimePending.current = false; playChime(); clearInterval(id); } }, 1000);
+    return () => clearInterval(id);
+  }, [alert]);
+  const dismissAlert = useCallback(() => { setAlert(null); chimePending.current = false; }, []);
 
   const start = useCallback((items: RoutineItem[]) => { if (!items.length) return; const t = Date.now(); setNow(t); setSession(transitions.start(items, t)); }, []);
   const pause = useCallback(() => setSession((s) => (s ? transitions.pause(s, Date.now()) : s)), []);
   const resume = useCallback(() => setSession((s) => (s ? transitions.resume(s, Date.now()) : s)), []);
   const goto = useCallback((i: number) => setSession((s) => (s ? transitions.goto(s, i, Date.now()) : s)), []);
-  const discard = useCallback(() => setSession(null), []);
+  const discard = useCallback(() => { setSession(null); setAlert(null); }, []);
   const setPiece = useCallback((itemKey: string, pieceId: string | null) => setSession((s) => {
     if (!s) return s;
     const pieces = { ...(s.pieces ?? {}) };
@@ -136,11 +198,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       for (const it of items) if (it.pieceId) await db.pieces.update(it.pieceId, { lastPracticed: date });
     }
     setSession(null);
+    setAlert(null);
     } finally { saving.current = false; }
   }, [session]);
 
   return (
-    <SessionContext.Provider value={{ session, now, start, pause, resume, goto, finish, discard, setPiece }}>
+    <SessionContext.Provider value={{ session, now, start, pause, resume, goto, finish, discard, setPiece, alert, dismissAlert }}>
       {children}
     </SessionContext.Provider>
   );

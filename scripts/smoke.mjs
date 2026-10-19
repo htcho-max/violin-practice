@@ -266,6 +266,77 @@ try {
     ok(errors.length === 0, `콘솔 오류 없음 ${errors.join(' | ')}`);
     await browser.close();
   }
+  // ── 2d. 누른 음부터 듣기, 음 고치기 ──
+  {
+    const { browser, page, errors } = await launch('phrases.wav');
+    await tab(page, '악보');
+    await page.getByTestId('score-file').setInputFiles(path.resolve('scripts/test-score.musicxml'));
+    await page.waitForTimeout(1800);
+    await page.getByTestId('to').fill('2');
+    await page.waitForTimeout(1200);
+    const headAt = async (i) => { const h = page.locator('[data-testid=osmd] .vf-notehead').nth(i); await h.scrollIntoViewIfNeeded(); await page.waitForTimeout(300); const b = await h.boundingBox(); return b ? [b.x + b.width / 2, b.y + b.height / 2] : [0, 0]; };
+    // 2마디 첫 음을 눌러 그 마디부터 듣기
+    let [x, y] = await headAt(4);
+    await page.mouse.click(x, y);
+    ok(await seen(page.getByTestId('here-bar')), '음표를 누르면 여기부터 듣기·채점 막대');
+    await page.getByTestId('here-play').click();
+    await page.waitForTimeout(1200);
+    ok(Number(await page.getByTestId('from').inputValue()) === 2, '누른 마디부터 구간 시작');
+    ok(await seen(page.getByTestId('float-pause')), '누른 마디부터 듣기 시작');
+    await page.getByTestId('float-stop').click();
+    await page.waitForTimeout(400);
+    // 음 고치기: 보이는 둘째 음을 반음 올리기
+    await page.getByTestId('edit-toggle').click();
+    await page.waitForTimeout(600);
+    [x, y] = await headAt(1);
+    await page.mouse.click(x, y);
+    ok(await seen(page.getByTestId('edit-sheet')), '음 고치기 창');
+    const before = (await page.getByTestId('edit-note').textContent()).trim();
+    await page.getByTestId('edit-up').click();
+    await page.waitForTimeout(1500);
+    const after = (await page.getByTestId('edit-note').textContent()).trim();
+    ok(before !== after && after.length > before.length, `반음 올리기 (${before} → ${after})`);
+    await page.getByTestId('edit-close').click();
+    await page.waitForTimeout(800);
+    await page.reload();
+    await page.waitForTimeout(800);
+    if (!(await page.getByTestId('score-view').isVisible().catch(() => false))) {
+      await tab(page, '악보');
+      await page.getByText('스모크 테스트 음계').first().click();
+    }
+    await page.waitForTimeout(1800);
+    await page.getByTestId('edit-toggle').click();
+    await page.waitForTimeout(400);
+    [x, y] = await headAt(1);
+    await page.mouse.click(x, y);
+    ok((await page.getByTestId('edit-note').textContent().catch(() => '')).trim() === after, '다시 열어도 고친 음 유지');
+    await page.getByTestId('edit-close').click();
+    page.once('dialog', (d) => d.accept());
+    await page.getByTestId('edit-revert-all').click();
+    await page.waitForTimeout(1500);
+    [x, y] = await headAt(1);
+    await page.mouse.click(x, y);
+    ok((await page.getByTestId('edit-note').textContent().catch(() => '')).trim() === before, '원래 악보로 되돌리기');
+    ok(errors.length === 0, `콘솔 오류 없음 ${errors.join(' | ')}`);
+    await browser.close();
+  }
+  // ── 2d. 연습 항목 시간 끝 알림 ──
+  {
+    const { browser, page, errors } = await launch('phrases.wav');
+    await page.evaluate(() => {
+      const now = Date.now();
+      localStorage.setItem('violin-active-session', JSON.stringify({ startedAt: now - 59500, items: [{ key: 'tune', label: '튜닝', minutes: 1 }, { key: 'scale', label: '음계·드론', minutes: 5 }], index: 0, accum: [59000, 0], runningSince: now, lastSeen: now }));
+    });
+    await page.reload();
+    ok(await seen(page.getByTestId('item-alert')), '항목 시간 끝 알림 띠');
+    ok(/튜닝 시간이 끝났어요 — 다음: 음계/.test(await page.getByTestId('item-alert').textContent().catch(() => '')), '알림 내용');
+    await page.getByTestId('item-alert-next').click();
+    await page.waitForTimeout(400);
+    ok(await page.getByTestId('item-alert').count() === 0, '다음으로 누르면 알림 닫힘');
+    ok(/2 \/ 2/.test(await page.locator('.page.today').textContent().catch(() => '')), '다음 항목으로 넘어감');
+    ok(errors.length === 0, `콘솔 오류 없음 ${errors.join(' | ')}`);
+    await browser.close();
+  }
   // ── 2c. 메트로놈 켜고 채점 ──
   {
     const { browser, page, errors } = await launch('phrases.wav');
@@ -288,6 +359,74 @@ try {
     await browser.close();
   }
 
+  // ── 2e. 레슨 노트 · 약한 마디 집중 연습 · 발전 그래프 ──
+  {
+    const { browser, page, errors } = await launch('phrases.wav');
+    await tab(page, '악보');
+    await page.getByTestId('score-file').setInputFiles(path.resolve('scripts/test-score.musicxml'));
+    await page.waitForTimeout(1800);
+    // 레슨 노트 추가 → 체크 → 다시 열어도 유지
+    await page.getByTestId('lesson-text').fill('2마디 활 끝까지');
+    await page.getByTestId('lesson-measure').fill('2');
+    await page.getByTestId('lesson-add').click();
+    await page.waitForTimeout(600);
+    ok(await seen(page.getByTestId('lesson-top')), '레슨 노트를 쓰면 악보 위 체크리스트에 보임');
+    await page.getByTestId('lesson-card').getByTestId('lesson-check').first().click();
+    await page.waitForTimeout(600);
+    // 약한 마디가 있는 지난 기록 두 개 넣기 (2마디 음을 자주 틀림)
+    await page.evaluate(async () => {
+      const req = indexedDB.open('violin-practice');
+      const dbx = await new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error); });
+      const scores = await new Promise((res) => { const r = dbx.transaction('scores').objectStore('scores').getAll(); r.onsuccess = () => res(r.result); });
+      const sid = scores[scores.length - 1].id;
+      const tx = dbx.transaction('scoreRuns', 'readwrite');
+      const st = tx.objectStore('scoreRuns');
+      const now = Date.now();
+      for (const [k, pct] of [[2, 60], [1, 70]]) {
+        st.add({ createdAt: now - k * 3600e3, date: '2026-10-19', scoreId: sid, title: '스모크 테스트 음계', from: 1, to: 2, durationSec: 20, total: 6, ok: 4, wrong: 2, missed: 0, meanAbs: 6 + k, rhythmMs: 40 + k * 10, bpm: pct, inSession: false,
+          notes: [[1, 0, 69, 2, 0, -20], [1, 1, 71, 4, 0, -20], [1, 2, 73, -3, 0, -20], [1, 3, 74, 1, 0, -20], [2, 0, 71, null, 1, null], [2, 1, 74, null, 1, null]] });
+      }
+      await new Promise((res) => { tx.oncomplete = res; });
+    });
+    await page.reload();
+    await page.waitForTimeout(800);
+    if (!(await page.getByTestId('score-view').isVisible().catch(() => false))) {
+      await tab(page, '악보');
+      await page.getByText('스모크 테스트 음계').first().click();
+    }
+    await page.waitForTimeout(1500);
+    ok(!(await page.getByTestId('lesson-top').isVisible().catch(() => false)), '체크한 레슨 노트는 맨 위 목록에서 빠짐');
+    ok(await seen(page.getByTestId('weak-card')), '약한 마디 카드');
+    ok(/2마디/.test(await page.getByTestId('weak-card').textContent()), `약한 마디에 2마디 (${(await page.getByTestId('weak-card').textContent()).slice(0, 40)})`);
+    ok(await seen(page.getByTestId('run-chart')), '발전 그래프');
+    await page.screenshot({ path: 'scripts/shot-practice.png', fullPage: true });
+    await page.getByTestId('weak-card').getByTestId('drill-start').first().click();
+    await page.waitForTimeout(800);
+    ok(await seen(page.getByTestId('drill-card')), '집중 연습 카드');
+    ok(Number(await page.getByTestId('from').inputValue()) === 2 && Number(await page.getByTestId('to').inputValue()) === 2, '집중 연습은 그 마디만');
+    ok(Number(await page.getByTestId('play-bpm').inputValue()) === 72 * 0.6 || /♩43/.test(await page.getByTestId('drill-card').textContent()), `사다리 60% 템포 (${await page.getByTestId('play-bpm').inputValue()})`);
+    await page.getByTestId('score-start').click();
+    await page.waitForTimeout(2500);
+    await page.getByTestId('score-stop').click();
+    await page.waitForTimeout(1500);
+    ok(await seen(page.getByTestId('drill-msg')), `채점하면 사다리 결과 (${(await page.getByTestId('drill-msg').textContent().catch(() => '')).slice(0, 50)})`);
+    // 오늘 화면: 지난번 약했던 마디 → 집중 연습으로 열기
+    await page.getByTestId('drill-end').click();
+    await tab(page, '오늘');
+    await page.waitForTimeout(800);
+    ok(await seen(page.getByTestId('today-weak')), '오늘 화면에 지난번 약했던 마디');
+    await page.getByTestId('today-drill').first().click();
+    await page.waitForTimeout(2000);
+    ok(await seen(page.getByTestId('drill-card')), '오늘 화면에서 바로 집중 연습으로 열기');
+    // 기록 화면의 레슨 노트
+    await tab(page, '기록');
+    await page.locator('.log .segmented').getByRole('button', { name: '연습 기록' }).click();
+    ok(await seen(page.getByTestId('lesson-log')), '기록 화면에 레슨 노트');
+    await page.getByTestId('lesson-log').getByText('한 것도 보기').click();
+    ok(/2마디 활 끝까지/.test(await page.getByTestId('lesson-log').textContent()), '레슨 노트 내용이 기록 화면에 남음');
+    ok(errors.length === 0, `콘솔 오류 없음 ${errors.join(' | ')}`);
+    await browser.close();
+  }
   // ── 2c. 연습곡 생성 (음계·포지션·에튀드) ──
   {
     const { browser, page, errors } = await launch('phrases.wav');

@@ -47,6 +47,15 @@ export function SettingsSheet({ onClose }: { onClose: () => void }) {
         <div className="row-setting">
           <label><input type="checkbox" checked={settings.wakeLock} onChange={(e) => update({ wakeLock: e.target.checked })} /> 연습 중 화면 꺼짐 방지</label>
         </div>
+        <div className="row-setting">
+          <label><input type="checkbox" checked={settings.itemAlert} onChange={(e) => update({ itemAlert: e.target.checked })} data-testid="item-alert-setting" /> 항목 시간 끝 알림 (짧은 소리·진동)</label>
+        </div>
+
+        <div className="row-setting col">
+          <span>이어폰 지연 보정 <small className="muted">(블루투스 이어폰은 보통 150~250ms)</small></span>
+          <span><NumField value={settings.latencyMs} min={0} max={400} step={10} label="이어폰 지연 보정 ms" width={56} testId="latency" onChange={(v) => update({ latencyMs: v })} /> ms</span>
+          <small className="muted">메트로놈·악보 듣기에서 박 깜빡임과 지금 음 표시를 이만큼 늦춰, 이어폰으로 들리는 때와 맞춰요. 유선 이어폰·스피커는 0.</small>
+        </div>
 
         <h3>루틴 항목</h3>
         {settings.routine.map((r, i) => (

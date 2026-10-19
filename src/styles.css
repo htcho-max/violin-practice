@@ -336,3 +336,60 @@ button.mini.on { border-color: var(--accent); color: var(--accent); font-weight:
 .beat-dot { width: 16px; height: 16px; border-radius: 50%; background: var(--line, #ccc); flex: none; transition: background 0.08s, transform 0.08s; }
 .beat-dot.on { background: var(--accent, #b85a12); transform: scale(1.25); }
 .beat-dot.on.accent { background: #d93b2b; transform: scale(1.5); }
+
+/* 누른 음부터 듣기·채점 */
+.here-bar { position: fixed; left: 50%; bottom: calc(12px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 60;
+  display: flex; align-items: center; gap: 8px; background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: 999px;
+  padding: 6px 8px 6px 14px; box-shadow: 0 8px 30px rgba(0,0,0,.25); max-width: calc(100vw - 24px); }
+.here-bar button { min-height: 44px; border-radius: 999px; padding: 6px 14px; white-space: nowrap; }
+.here-bar button.mini { min-width: 40px; padding: 4px 8px; }
+.tap-hint { margin: 2px 0 6px; }
+
+/* 약한 마디 · 템포 사다리 */
+.weak-list { list-style: none; padding: 0; margin: 6px 0; display: flex; flex-direction: column; gap: 6px; }
+.weak-list li { display: flex; align-items: center; gap: 8px; justify-content: space-between; border-bottom: 1px solid var(--line); padding: 4px 0; }
+.weak-list li > span { flex: 1; min-width: 0; }
+.weak-list button.mini { min-height: 36px; white-space: nowrap; }
+.drill-card { border-color: var(--accent); }
+.ladder { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0; }
+.ladder-step { padding: 6px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface-2); font-size: 14px; font-variant-numeric: tabular-nums; }
+.ladder-step.done { border-color: var(--good); color: var(--good); }
+.ladder-step.now { border-color: var(--accent); background: var(--accent); color: var(--accent-ink); font-weight: 700; }
+
+/* 레슨 노트 */
+.lesson-add textarea { width: 100%; box-sizing: border-box; font: inherit; padding: 8px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); color: var(--text); }
+.lesson-add .row-setting { flex-wrap: wrap; gap: 8px; align-items: center; }
+.lesson-add input[type=date] { font: inherit; padding: 6px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--text); }
+.lesson-list { list-style: none; padding: 0; margin: 6px 0; display: flex; flex-direction: column; gap: 4px; }
+.lesson-note { display: flex; flex-direction: column; gap: 2px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.lesson-check { display: flex; gap: 8px; align-items: flex-start; }
+.lesson-check input[type=checkbox] { width: 22px; height: 22px; flex: none; margin-top: 1px; }
+.lesson-text { white-space: pre-wrap; line-height: 1.4; }
+.lesson-note.done .lesson-text { text-decoration: line-through; color: var(--muted); }
+.lesson-meta { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; padding-left: 30px; }
+.lesson-meta button.mini { min-height: 30px; padding: 2px 8px; }
+.lesson-input { flex: 1; }
+.lesson-date { margin-top: 8px; }
+.lesson-top { border-left: 4px solid var(--accent); }
+.lesson-pin { position: absolute; font-size: 14px; line-height: 1; white-space: nowrap; }
+
+/* 발전 그래프 · 셈여림 그래프 */
+.run-chart { width: 100%; height: auto; max-height: 220px; display: block; margin: 6px 0; }
+.run-chart .grid { stroke: var(--line); stroke-width: 0.6; }
+.run-chart .axis { fill: var(--muted); font-size: 9px; }
+.run-chart .line { stroke: var(--accent); stroke-width: 1.8; stroke-linejoin: round; }
+.run-chart .line.expected { stroke: var(--muted); stroke-dasharray: 3 3; stroke-width: 1.4; }
+.run-chart .dot { fill: var(--accent); }
+.run-chart .flag { fill: var(--warn-zone); }
+.legend { margin-right: 10px; color: var(--accent); }
+.legend.expected { color: var(--muted); }
+.rec-compare { display: grid; grid-template-columns: 1fr; gap: 8px; margin-top: 8px; }
+.rec-compare audio { width: 100%; }
+@media (min-width: 720px) { .rec-compare { grid-template-columns: 1fr 1fr; } }
+
+/* 연습 항목 시간 끝 알림 */
+.item-alert { position: fixed; left: 50%; transform: translateX(-50%); top: calc(env(safe-area-inset-top, 0px) + 8px); z-index: 60;
+  width: min(560px, calc(100% - 24px)); display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between;
+  padding: 10px 14px; border-radius: 14px; background: var(--card, #fff); color: var(--ink, #222); border: 2px solid var(--accent, #b85a12);
+  box-shadow: 0 6px 24px rgba(0,0,0,.18); }
+.item-alert-btns { display: flex; gap: 6px; margin-left: auto; }

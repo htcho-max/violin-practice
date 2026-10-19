@@ -1,8 +1,8 @@
 import type { ScoreNote } from './parse';
 
-export interface Played { midi: number; cents: number; start: number }
+export interface Played { midi: number; cents: number; start: number; /** 그 음의 평균 소리 크기 (dB) */ db?: number | null }
 export type Status = 'ok' | 'wrong' | 'missed';
-export interface Scored { note: ScoreNote; status: Status; cents: number | null; playedMidi: number | null; /** 연주한 음의 시작 시각(초). 같은 음 묶음은 첫 음만 */ playedStart?: number | null }
+export interface Scored { note: ScoreNote; status: Status; cents: number | null; playedMidi: number | null; /** 연주한 음의 시작 시각(초). 같은 음 묶음은 첫 음만 */ playedStart?: number | null; /** 연주한 음의 소리 크기 (dB) */ db?: number | null }
 
 /**
  * 악보의 음 순서와 연주한 음 순서를 맞추기 (템포와 무관).
@@ -47,7 +47,7 @@ export function alignNotes(expected: ScoreNote[], played: Played[]): Scored[] {
     if (t === 0) {
       const g = groups[i - 1], p = P[j - 1];
       const same = g.midi === p.midi;
-      res[i - 1] = g.members.map((note, k) => ({ note, status: same ? 'ok' : 'wrong', cents: same ? p.cents : null, playedMidi: p.midi, playedStart: k === 0 ? p.start : null }));
+      res[i - 1] = g.members.map((note, k) => ({ note, status: same ? 'ok' : 'wrong', cents: same ? p.cents : null, playedMidi: p.midi, playedStart: k === 0 ? p.start : null, db: p.db ?? null }));
       i--; j--;
     } else if (t === 1) {
       res[i - 1] = groups[i - 1].members.map((note) => ({ note, status: 'missed', cents: null, playedMidi: null }));

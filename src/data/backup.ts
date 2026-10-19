@@ -8,7 +8,7 @@ export interface Backup {
   withRecordings: boolean;
   tables: Record<string, unknown[]>;
 }
-const TABLES = ['sessions', 'pieces', 'kv', 'ladders', 'scores', 'scoreRuns', 'recordings'] as const;
+const TABLES = ['sessions', 'pieces', 'kv', 'ladders', 'scores', 'scoreRuns', 'lessonNotes', 'recordings'] as const;
 
 function blobToDataURL(b: Blob): Promise<string> {
   return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result as string); r.onerror = () => rej(r.error); r.readAsDataURL(b); });
@@ -68,7 +68,7 @@ export async function restoreBackup(text: string): Promise<{ counts: Record<stri
   const recs = data.withRecordings && Array.isArray(t.recordings)
     ? await Promise.all((t.recordings as { blob: string }[]).map(async (r) => ({ ...r, blob: await dataURLToBlob(r.blob) })))
     : null;
-  await db.transaction('rw', [db.sessions, db.pieces, db.kv, db.ladders, db.scores, db.scoreRuns, db.recordings], async () => {
+  await db.transaction('rw', [db.sessions, db.pieces, db.kv, db.ladders, db.scores, db.scoreRuns, db.lessonNotes, db.recordings], async () => {
     for (const name of TABLES) {
       const rows = name === 'recordings' ? recs : (t[name] as unknown[] | undefined);
       if (!rows) continue;

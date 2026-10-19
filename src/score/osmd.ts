@@ -95,3 +95,24 @@ export function noteElements(osmd: OpenSheetMusicDisplay, part = 0): Map<string,
   }
   return out;
 }
+
+/**
+ * 다시 그리지 않고 이미 그려진 음표 머리 색만 바꿈. els: noteElements 결과, colors: "마디:순서" → 색 (없으면 원래 색)
+ * 처음 바꿀 때 원래 색을 data-fill0 에 적어 두고, 색을 지우면 그 색으로 돌림.
+ */
+export function paintNotes(els: Map<string, string[]>, colors: Map<string, string>, root: ParentNode = document) {
+  for (const [key, ids] of els) {
+    const c = colors.get(key);
+    for (const id of ids) {
+      const g = (root as Document).getElementById?.(`vf-${id}`) ?? (root as Document).getElementById?.(id) ?? root.querySelector(`[id="vf-${id}"]`);
+      if (!g) continue;
+      for (const p of Array.from(g.querySelectorAll('.vf-notehead path, .vf-notehead text'))) {
+        if (!p.hasAttribute('data-fill0')) { p.setAttribute('data-fill0', p.getAttribute('fill') ?? ''); p.setAttribute('data-stroke0', p.getAttribute('stroke') ?? ''); }
+        const f0 = p.getAttribute('data-fill0') ?? '', s0 = p.getAttribute('data-stroke0') ?? '';
+        const fill = c ?? f0, stroke = c ?? s0;
+        if (fill) p.setAttribute('fill', fill); else p.removeAttribute('fill');
+        if (stroke) p.setAttribute('stroke', stroke); else p.removeAttribute('stroke');
+      }
+    }
+  }
+}

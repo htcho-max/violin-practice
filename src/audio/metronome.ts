@@ -1,6 +1,7 @@
 import { resumeAudio } from './context';
 import { TickScheduler, type Tick, type Meter } from './schedule';
 import { noteClick, clearClicks } from './clicks';
+import { outputLatency } from './latency';
 
 export type ClickSound = 'beep' | 'wood';
 const LOOKAHEAD = 0.1;
@@ -55,7 +56,7 @@ class Metronome {
     for (const tick of this.core.advance(ctx.currentTime + LOOKAHEAD)) {
       this.play(ctx, tick);
       noteClick(tick.time);
-      const delay = Math.max(0, (tick.time - ctx.currentTime) * 1000);
+      const delay = Math.max(0, (tick.time - ctx.currentTime + outputLatency()) * 1000); // 이어폰 지연만큼 화면을 늦춤
       const h = setTimeout(() => {
         this.timeouts = this.timeouts.filter((x) => x !== h);
         this.visualListeners.forEach((fn) => fn(tick));

@@ -1,3 +1,4 @@
+import { ItemAlert } from './components/ItemAlert';
 import { useEffect, useState } from 'react';
 import { TabBar, type TabId } from './components/TabBar';
 import { StatusBar } from './components/StatusBar';
@@ -48,6 +49,7 @@ export function App({ updatedFrom = null }: { updatedFrom?: string | null }) {
           </>
         )}
       </main>
+      <ItemAlert />
       <TabBar tab={tab} onChange={go} />
       {settingsOpen && <SettingsSheet onClose={() => setSettingsOpen(false)} />}
       {toast && <div className="toast" role="status" onClick={() => setToast(null)}>{toast}</div>}

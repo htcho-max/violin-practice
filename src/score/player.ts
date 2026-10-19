@@ -4,6 +4,7 @@ import { midiToFreq } from '../audio/notes';
 import type { ParsedScore, ScoreNote } from './parse';
 import { loadViolinSamples, scheduleViolinNote } from '../audio/violinSampler';
 import { noteClick, clearClicks } from '../audio/clicks';
+import { outputLatency } from '../audio/latency';
 
 export type Voice = 'sample' | 'synth';
 
@@ -41,7 +42,54 @@ export function planPlayback(s: ParsedScore, o: PlanOptions, accParts: AccPart[]
     for (const n of ap.score.notes) if (start.has(n.measure)) accEv.push({ note: n, time: (start.get(n.measure)! + n.beat) * q, dur: n.dur * q, inst: ap.inst });
   }
   accEv.sort((a, b) => a.time - b.time);
-  return { events, clicks, total: acc * q, acc: accEv };
+  return applyFermatas({ events, clicks, total: acc * q, acc: accEv });
+}
+
+/** 늘임표: 그 음을 1.8배로 늘리고 뒤는 그만큼 밀기 (재생 때만. 채점 기준 박 위치는 그대로) */
+export const FERMATA = 1.8;
+export function applyFermatas(plan: Plan): Plan {
+  const wins = plan.events.filter((e) => e.note.art?.fermata).map((e) => ({ s: e.time, d: e.dur, x: e.dur * (FERMATA - 1) }));
+  if (!wins.length) return plan;
+  const w = (t: number) => {
+    let out = t;
+    for (const v of wins) {
+      if (t >= v.s + v.d - 1e-9) out += v.x;
+      else if (t > v.s) out += ((t - v.s) / v.d) * v.x;
+    }
+    return out;
+  };
+  const ev = (e: PlayEvent): PlayEvent => { const a = w(e.time), b = w(e.time + e.dur); return { ...e, time: a, dur: b - a }; };
+  return { events: plan.events.map(ev), acc: plan.acc.map(ev), clicks: plan.clicks.map((c) => ({ ...c, time: w(c.time) })), total: w(plan.total) };
+}
+
+/** 꾸밈음·트릴 등을 실제로 낼 짧은 음들로 (시각은 계획의 초). 꾸밈 없는 음은 그 음 하나 */
+export interface Piece { midi: number; time: number; len: number; legato: boolean }
+export const GRACE = 0.07;
+/** 몇 초 앞까지 미리 예약할지 */
+const AHEAD = 2.5;
+export function expandOrnaments(e: PlayEvent, len: number): Piece[] {
+  const a = e.note.art ?? {};
+  const out: Piece[] = [];
+  const g = a.grace ?? [];
+  g.forEach((m, k) => out.push({ midi: m, time: Math.max(0, e.time - (g.length - k) * GRACE), len: GRACE * 0.95, legato: true }));
+  const o = a.orn;
+  if (!o) { out.push({ midi: e.note.midi, time: e.time, len, legato: false }); return out; }
+  const step = Math.min(0.075, Math.max(0.04, e.dur / 4));
+  const M = e.note.midi;
+  let seq: number[];
+  if (o.kind === 'trill') {
+    const n = Math.max(2, Math.floor(len / step));
+    seq = Array.from({ length: n }, (_, k) => (k % 2 ? o.upper : M));
+    seq[seq.length - 1] = M; // 끝은 원래 음
+  } else if (o.kind === 'invmordent') seq = [M, o.upper];
+  else if (o.kind === 'mordent') seq = [M, o.lower];
+  else seq = [o.upper, M, o.lower];
+  seq.forEach((m, k) => out.push({ midi: m, time: e.time + k * step, len: step * 1.02, legato: k > 0 }));
+  // 남은 길이는 원래 음으로 (트릴은 이미 끝까지 채움)
+  const used = seq.length * step;
+  if (o.kind !== 'trill' && len - used > 0.02) out.push({ midi: M, time: e.time + used, len: len - used, legato: true });
+  else if (o.kind === 'trill') out[out.length - 1].len = Math.max(step, len - (seq.length - 1) * step);
+  return out;
 }
 
 /** 연주법에 따라 소리 내는 길이·어택·세기 (초 단위 길이 dur 기준) */
@@ -113,7 +161,11 @@ function pluckNote(ctx: BaseAudioContext, out: AudioNode, f: number, a: number, 
 
 /** 바이올린 비슷한 소리로 재생. stop() 을 돌려줌 */
 export class ScorePlayer {
-  private nodes: AudioScheduledSourceNode[] = [];
+  /** 아직 소리 나는(또는 예약된) 노드 — 끝나면 저절로 빠짐 */
+  private nodes = new Set<AudioScheduledSourceNode>();
+  private keep = (...ns: AudioScheduledSourceNode[]) => {
+    for (const n of ns) { this.nodes.add(n); n.addEventListener?.('ended', () => this.nodes.delete(n)); }
+  };
   private timers: ReturnType<typeof setTimeout>[] = [];
   private ctx: AudioContext | null = null;
   playing = false;
@@ -146,87 +198,113 @@ export class ScorePlayer {
     lp.frequency.value = 3500;
     lp.connect(master).connect(ctx.destination);
     this.startedAt = t0;
-    // 반주
-    if (plan.acc.length) {
-      const accGain = ctx.createGain();
-      accGain.gain.value = opts.accVolume ?? 0.6;
-      accGain.connect(master);
-      for (const e of plan.acc) {
-        const a = t0 + e.time;
-        if (e.inst === 'piano') { this.nodes.push(...pianoNote(ctx, accGain, midiToFreq(e.note.midi, opts.a4), a, e.dur)); continue; }
-        const sh = noteShape(e);
-        if (sh.pizz) { this.nodes.push(pluckNote(ctx, accGain, midiToFreq(e.note.midi, opts.a4), a, e.dur, sh.gain)); continue; }
-        if (useSample) { const n = scheduleViolinNote(ctx, accGain, e.note.midi, a, sh.len, opts.a4, 0.8 * sh.gain, sh.attack); if (n) { this.nodes.push(n); continue; } }
-        this.nodes.push(...pianoNote(ctx, accGain, midiToFreq(e.note.midi, opts.a4), a, e.dur));
-      }
-    }
-    const lat = (ctx as AudioContext & { outputLatency?: number }).outputLatency ?? ctx.baseLatency ?? 0;
-    for (const [idx, e] of plan.events.entries()) {
-      const a0 = t0 + e.time;
-      this.timers.push(setTimeout(() => opts.onNote?.(e, idx), Math.max(0, (a0 - ctx.currentTime + lat) * 1000)));
-      if (opts.mute) continue;
-      const sh = noteShape(e);
-      if (sh.pizz) { this.nodes.push(pluckNote(ctx, master, midiToFreq(e.note.midi, opts.a4), a0, e.dur, sh.gain)); continue; }
-      if (useSample) {
-        const n = scheduleViolinNote(ctx, master, e.note.midi, a0, sh.len, opts.a4, 0.9 * sh.gain, sh.attack);
-        if (n) { this.nodes.push(n); continue; }
-      }
+    const accGain = ctx.createGain();
+    accGain.gain.value = opts.accVolume ?? 0.6;
+    accGain.connect(master);
+    // 화면 표시(지금 음·박 깜빡임)는 기기 출력 지연 + 이어폰 지연 보정만큼 늦춤
+    const lat = ((ctx as AudioContext & { outputLatency?: number }).outputLatency ?? ctx.baseLatency ?? 0) + outputLatency();
+    const visual = (abs: number, fn: () => void) => this.timers.push(setTimeout(fn, Math.max(0, (abs - ctx.currentTime + lat) * 1000)));
+
+    /** 바이올린 소리 한 음 (샘플 → 합성음) */
+    const violinTone = (out: AudioNode, synthOut: AudioNode, midi: number, a: number, len: number, gain: number, attack: number, vib: boolean) => {
+      if (useSample) { const n = scheduleViolinNote(ctx, out, midi, a, len, opts.a4, gain, attack); if (n) { this.keep(n); return; } }
       const osc = ctx.createOscillator();
       osc.setPeriodicWave(wave);
-      const f = midiToFreq(e.note.midi, opts.a4);
+      const f = midiToFreq(midi, opts.a4);
       osc.frequency.value = f;
       // 살짝 늦게 들어오는 비브라토 (긴 음만)
-      if (e.dur > 0.5) {
+      if (vib) {
         const lfo = ctx.createOscillator();
         lfo.frequency.value = 5.5;
         const depth = ctx.createGain();
-        depth.gain.setValueAtTime(0, t0 + e.time);
-        depth.gain.linearRampToValueAtTime(f * 0.004, t0 + e.time + 0.35);
+        depth.gain.setValueAtTime(0, a);
+        depth.gain.linearRampToValueAtTime(f * 0.004, a + 0.35);
         lfo.connect(depth).connect(osc.frequency);
-        lfo.start(t0 + e.time);
-        lfo.stop(t0 + e.time + e.dur + 0.05);
-        this.nodes.push(lfo);
+        lfo.start(a);
+        lfo.stop(a + len + 0.05);
+        this.keep(lfo);
       }
       const g = ctx.createGain();
-      const a = t0 + e.time, len = Math.max(0.05, sh.len);
+      const L = Math.max(0.05, len), gg = gain / 0.9;
       g.gain.setValueAtTime(0, a);
-      g.gain.linearRampToValueAtTime(sh.gain, a + Math.min(Math.max(0.03, sh.attack), len / 3));
-      g.gain.setValueAtTime(0.85 * sh.gain, a + len * 0.6);
-      g.gain.linearRampToValueAtTime(0, a + len);
-      osc.connect(g).connect(lp);
+      g.gain.linearRampToValueAtTime(gg, a + Math.min(Math.max(0.03, attack), L / 3));
+      g.gain.setValueAtTime(0.85 * gg, a + L * 0.6);
+      g.gain.linearRampToValueAtTime(0, a + L);
+      osc.connect(g).connect(synthOut);
       osc.start(a);
-      osc.stop(a + len + 0.02);
-      this.nodes.push(osc);
+      osc.stop(a + L + 0.02);
+      this.keep(osc);
+    };
+    const playEvent = (e: PlayEvent, out: AudioNode, synthOut: AudioNode, base: number) => {
+      const sh = noteShape(e);
+      for (const pc of expandOrnaments(e, sh.len)) {
+        const a = t0 + pc.time;
+        const isMain = pc.time === e.time && pc.midi === e.note.midi && !e.note.art?.orn;
+        if (sh.pizz) { this.keep(pluckNote(ctx, out, midiToFreq(pc.midi, opts.a4), a, isMain ? e.dur : pc.len, sh.gain)); continue; }
+        violinTone(out, synthOut, pc.midi, a, pc.len, base * sh.gain, pc.legato ? 0.008 : sh.attack, isMain && e.dur > 0.5);
+      }
+    };
+
+    // 예약할 일: 시각(계획의 초)과 실제로 예약하는 함수. 2.5초 앞까지만 조금씩 예약해 긴 곡도 가볍게
+    type Job = { at: number; run: () => void };
+    const jobs: Job[] = [];
+    for (const e of plan.acc) {
+      jobs.push({ at: Math.max(0, e.time - GRACE * (e.note.art?.grace?.length ?? 0)), run: () => {
+        if (e.inst === 'piano') { this.keep(...pianoNote(ctx, accGain, midiToFreq(e.note.midi, opts.a4), t0 + e.time, e.dur)); return; }
+        if (!useSample) { this.keep(...pianoNote(ctx, accGain, midiToFreq(e.note.midi, opts.a4), t0 + e.time, e.dur)); return; }
+        playEvent(e, accGain, accGain, 0.8);
+      } });
+    }
+    for (const [idx, e] of plan.events.entries()) {
+      jobs.push({ at: Math.max(0, e.time - GRACE * (e.note.art?.grace?.length ?? 0)), run: () => {
+        visual(t0 + e.time, () => opts.onNote?.(e, idx));
+        if (!opts.mute) playEvent(e, master, lp, 0.9);
+      } });
     }
     const firstNote = plan.events.length ? plan.events[0].time : Infinity;
     for (const [k, c] of plan.clicks.entries()) {
-      // 눈으로 보는 박자 (깜빡임)
-      if (opts.onBeat) this.timers.push(setTimeout(() => opts.onBeat?.(k, c.accent), Math.max(0, (t0 + c.time - ctx.currentTime + lat) * 1000)));
-      if (opts.click === 'visual') continue; // 소리 없이
-      if (!opts.click && c.time >= firstNote - 1e-6) continue; // 카운트인만
-      noteClick(t0 + c.time); // 음높이 분석에서 클릭 소리는 빼도록
-      const osc = ctx.createOscillator();
-      osc.frequency.value = c.accent ? 1760 : 1320;
-      const g = ctx.createGain();
-      const a = t0 + c.time;
-      g.gain.setValueAtTime(c.accent ? 0.35 : 0.22, a);
-      g.gain.exponentialRampToValueAtTime(0.001, a + 0.05);
-      osc.connect(g).connect(ctx.destination);
-      osc.start(a);
-      osc.stop(a + 0.06);
-      this.nodes.push(osc);
+      jobs.push({ at: c.time, run: () => {
+        // 눈으로 보는 박자 (깜빡임)
+        if (opts.onBeat) visual(t0 + c.time, () => opts.onBeat?.(k, c.accent));
+        if (opts.click === 'visual') return; // 소리 없이
+        if (!opts.click && c.time >= firstNote - 1e-6) return; // 카운트인만
+        const a = t0 + c.time;
+        noteClick(a); // 음높이 분석에서 클릭 소리는 빼도록 (실제 소리 나는 시각)
+        const osc = ctx.createOscillator();
+        osc.frequency.value = c.accent ? 1760 : 1320;
+        const g = ctx.createGain();
+        g.gain.setValueAtTime(c.accent ? 0.35 : 0.22, a);
+        g.gain.exponentialRampToValueAtTime(0.001, a + 0.05);
+        osc.connect(g).connect(ctx.destination);
+        osc.start(a);
+        osc.stop(a + 0.06);
+        this.keep(osc);
+      } });
     }
-    this.timers.push(setTimeout(() => { this.playing = false; opts.onNote?.(null); opts.onEnd?.(); }, (t0 - ctx.currentTime + plan.total) * 1000 + 100));
+    jobs.sort((a, b) => a.at - b.at);
+    let ptr = 0;
+    const pump = () => {
+      if (gen !== this.gen) return;
+      const horizon = ctx.currentTime + AHEAD - t0;
+      while (ptr < jobs.length && jobs[ptr].at <= horizon) jobs[ptr++].run();
+      if (ptr >= jobs.length && this.pumpTimer) { clearInterval(this.pumpTimer); this.pumpTimer = null; }
+    };
+    pump();
+    if (ptr < jobs.length) this.pumpTimer = setInterval(pump, 250);
+    this.timers.push(setTimeout(() => { this.playing = false; opts.onNote?.(null); opts.onEnd?.(); }, (t0 - ctx.currentTime + plan.total + lat) * 1000 + 100));
   }
+
+  private pumpTimer: ReturnType<typeof setInterval> | null = null;
 
   stop() {
     this.gen++;
+    if (this.pumpTimer) { clearInterval(this.pumpTimer); this.pumpTimer = null; }
     clearClicks();
     this.timers.forEach(clearTimeout);
     this.timers = [];
     const now = this.ctx?.currentTime ?? 0;
     for (const n of this.nodes) { try { n.stop(now); } catch { /* 이미 끝남 */ } }
-    this.nodes = [];
+    this.nodes.clear();
     this.playing = false;
   }
 }

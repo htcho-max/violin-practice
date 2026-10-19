@@ -1,3 +1,4 @@
+import { useToday } from '../state/useToday';
 import { useEffect, useState } from 'react';
 import { useSession, itemMs, totalMs } from '../state/session';
 import { useSettings } from '../state/settings';
@@ -10,6 +11,11 @@ import type { Piece } from '../data/db';
 import { useProgress, nextSuggestions, requestOpen, openStep, createBow, loadOpts } from './Exercises';
 import { STEPS } from '../exercise/curriculum';
 import { useScoreRuns } from '../state/useScoreRuns';
+import { liveQuery } from 'dexie';
+import { db } from '../data/db';
+import { topWeakSpots, pitchHabits, scaleHas, ladderKey, LADDER_PCTS } from '../score/practice';
+import { useDrills } from '../state/useDrills';
+import { requestScore } from '../state/openRequest';
 
 function PieceChips({ list, selected, onPick }: { list: Piece[]; selected?: string; onPick: (id: string | null) => void }) {
   if (!list.length) return null;
@@ -39,7 +45,7 @@ export function Today({ go, openSettings }: { go: (t: TabId) => void; openSettin
   const [confirmEnd, setConfirmEnd] = useState(false);
   useEffect(() => { if (!session) { setMemo(''); setConfirmEnd(false); } }, [session]);
 
-  const today = localDate();
+  const today = useToday();
   const runs = useScoreRuns();
   const todaySec = sessions.filter((s) => s.date === today).reduce((a, s) => a + s.totalSec, 0)
     + runs.filter((r) => r.date === today && !r.inSession).reduce((a, r) => a + r.durationSec, 0);
@@ -53,6 +59,49 @@ export function Today({ go, openSettings }: { go: (t: TabId) => void; openSettin
   const sug = nextSuggestions(progress);
   const passedSteps = STEPS.filter((x) => progress[x.id]?.passed).length;
   const openEx = (fn: () => Promise<number>) => { requestOpen(fn); go('score'); };
+  // 지난번 약했던 마디 (지금 있는 악보만) · 음정 습관
+  const ladders = useDrills();
+  const [scoreIds, setScoreIds] = useState<Set<number> | null>(null);
+  useEffect(() => {
+    const sub = liveQuery(() => db.scores.toCollection().primaryKeys()).subscribe({ next: (k) => setScoreIds(new Set(k as number[])), error: () => {} });
+    return () => sub.unsubscribe();
+  }, []);
+  const weak = scoreIds ? topWeakSpots(runs.filter((r) => scoreIds.has(r.scoreId)), ladders, 3) : [];
+  const habits = pitchHabits(runs).slice(0, 4);
+  const weakCard = weak.length > 0 && (
+    <div className="card" data-testid="today-weak">
+      <div className="card-head"><b>지난번 약했던 마디</b></div>
+      <ul className="weak-list">
+        {weak.map((w) => {
+          const l = ladders[ladderKey(w.scoreId, w.measure)];
+          return (
+            <li key={`${w.scoreId}:${w.measure}`}>
+              <span><b>{w.title}</b> <span className="muted small">{w.measure}마디 · {w.okRate !== null ? `맞은 음 ${Math.round(w.okRate * 100)}%` : '자주 벗어남'}{w.meanAbs !== null ? ` · ±${Math.round(w.meanAbs)}센트` : ''}{l && !l.done ? ` · 사다리 ${LADDER_PCTS[l.idx]}%` : ''}</span></span>
+              <button className="mini primary" onClick={() => { requestScore({ scoreId: w.scoreId, measure: w.measure, drill: true }); go('score'); }} data-testid="today-drill">집중 연습</button>
+            </li>
+          );
+        })}
+      </ul>
+      <p className="hint">느린 템포부터 통과할 때마다 10%씩 올려요.</p>
+    </div>
+  );
+  const habitsCard = habits.length > 0 && (
+    <div className="card" data-testid="habits-card">
+      <div className="card-head"><b>음정 습관</b><span className="muted small">최근 악보 채점에서</span></div>
+      <ul className="weak-list">
+        {habits.map((h) => {
+          const step = STEPS.find((x) => x.spec.pattern === 'scale' && x.spec.positions === '1' && scaleHas(x.spec.key, h.midi));
+          return (
+            <li key={h.midi}>
+              <span><b>{h.string} {h.name}</b> <span className={`small ${Math.abs(h.mean) > 15 ? 'bad' : 'warn'}`}>{h.mean > 0 ? '+' : ''}{Math.round(h.mean)}센트</span><br /><span className="muted small">{h.tip} ({h.n}번)</span></span>
+              {step ? <button className="mini" onClick={() => openEx(() => openStep(step))}>{step.title}</button> : <button className="mini" onClick={() => go('drone')}>드론</button>}
+            </li>
+          );
+        })}
+      </ul>
+      <p className="hint">드론(같은 음 소리)을 켜고 그 음을 길게 켜며 맞추면 손가락 자리가 빨리 잡혀요.</p>
+    </div>
+  );
   const basicsCard = (
     <div className="card" data-testid="basics-card">
       <div className="card-head"><b>오늘의 기초 연습</b><span className="muted small">연습곡 {passedSteps}/{STEPS.length} 통과</span></div>
@@ -122,7 +171,9 @@ export function Today({ go, openSettings }: { go: (t: TabId) => void; openSettin
           </ol>
           <button className="primary wide big" onClick={() => start(settings.routine.filter((r) => r.minutes > 0))} disabled={!settings.routine.some((r) => r.minutes > 0)} data-testid="session-start">▶ 연습 시작</button>
         </div>
+        {weakCard}
         {basicsCard}
+        {habitsCard}
         {piecesCard}
       </section>
     );

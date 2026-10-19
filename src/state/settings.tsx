@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { db } from '../data/db';
 import { DEFAULT_SETTINGS, mergeSettings, type Settings } from '../data/settings';
+import { setOutputLatency } from '../audio/latency';
 
 interface Ctx { settings: Settings; update: (patch: Partial<Settings>) => void; ready: boolean }
 const SettingsContext = createContext<Ctx>({ settings: DEFAULT_SETTINGS, update: () => {}, ready: false });
@@ -25,6 +26,8 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       return next;
     });
   }, []);
+
+  useEffect(() => { setOutputLatency(settings.latencyMs / 1000); }, [settings.latencyMs]);
 
   return <SettingsContext.Provider value={{ settings, update, ready }}>{children}</SettingsContext.Provider>;
 }
