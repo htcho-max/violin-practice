@@ -3,7 +3,7 @@ const times: number[] = [];
 
 export function noteClick(t: number) {
   times.push(t);
-  if (times.length > 64) times.splice(0, times.length - 64);
+  if (times.length > 4096) times.splice(0, times.length - 4096); // 악보 재생은 클릭을 미리 한꺼번에 예약
 }
 
 export function clearClicks() { times.length = 0; }

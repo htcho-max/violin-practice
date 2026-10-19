@@ -266,6 +266,27 @@ try {
     ok(errors.length === 0, `콘솔 오류 없음 ${errors.join(' | ')}`);
     await browser.close();
   }
+  // ── 2c. 메트로놈 켜고 채점 ──
+  {
+    const { browser, page, errors } = await launch('phrases.wav');
+    await tab(page, '악보');
+    await page.getByTestId('score-file').setInputFiles(path.resolve('scripts/test-score.musicxml'));
+    await page.waitForTimeout(1500);
+    await page.getByTestId('to').fill('2');
+    await page.waitForTimeout(800);
+    await page.getByTestId('score-metro-sound').click();
+    await page.getByTestId('score-start').click();
+    await page.waitForTimeout(700);
+    ok(await seen(page.getByTestId('beat-dot')), '메트로놈 켜고 채점: 박 점 표시');
+    await page.waitForTimeout(4500);
+    await page.getByTestId('score-stop').click();
+    await page.waitForTimeout(1200);
+    const res = await page.getByTestId('score-result').textContent();
+    const pct = Number(res.match(/(\d+)%/)?.[1]);
+    ok(pct >= 80, `메트로놈 켜고 채점 맞은 음 ${pct}%`);
+    ok(errors.length === 0, `콘솔 오류 없음 ${errors.join(' | ')}`);
+    await browser.close();
+  }
 
   // ── 2c. 연습곡 생성 (음계·포지션·에튀드) ──
   {

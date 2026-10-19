@@ -233,6 +233,17 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
   const [playing, setPlaying] = useState(false);
   const [playBpm, setPlayBpm] = useState(72);
   const [withClick, setWithClick] = useState(false);
+  /** 채점할 때 박자: 끔 / 깜빡임만 / 소리 */
+  const [scoreMetro, setScoreMetroS] = useState<'off' | 'visual' | 'sound'>(() => { try { const v = localStorage.getItem('score-metro'); return v === 'visual' || v === 'sound' ? v : 'off'; } catch { return 'off'; } });
+  const setScoreMetro = (v: 'off' | 'visual' | 'sound') => { setScoreMetroS(v); try { localStorage.setItem('score-metro', v); } catch { /* 무시 */ } };
+  const beatDot = useRef<HTMLSpanElement | null>(null);
+  const beatTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onBeat = (_k: number, accent: boolean) => {
+    const el = beatDot.current; if (!el) return;
+    el.classList.remove('on', 'accent'); void el.offsetWidth; el.classList.add('on'); if (accent) el.classList.add('accent');
+    if (beatTimer.current) clearTimeout(beatTimer.current);
+    beatTimer.current = setTimeout(() => el.classList.remove('on', 'accent'), 140);
+  };
   const [countIn, setCountIn] = useState(true);
   const [loop, setLoop] = useState(false);
   const [voice, setVoice] = useState<Voice>('sample');
@@ -423,16 +434,17 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
     if (scroll) lit.current[0]?.scrollIntoView?.({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
   }
   const curIdx = useRef(0);
-  async function playRange(resumeAt?: number, o: { keepListening?: boolean; muteMine?: boolean } = {}) {
+  async function playRange(resumeAt?: number, o: { keepListening?: boolean; muteMine?: boolean; click?: boolean | 'visual'; acc?: boolean } = {}) {
     if (listening && !o.keepListening) stop();
-    const full = planPlayback(playParsed, { bpm: playBpm, from, to, countIn: o.keepListening ? true : resumeAt === undefined && countIn }, hasAcc && (accOn || o.keepListening) ? accParts : []);
+    const full = planPlayback(playParsed, { bpm: playBpm, from, to, countIn: o.keepListening ? true : resumeAt === undefined && countIn }, hasAcc && (o.keepListening ? o.acc : accOn) ? accParts : []);
     const plan = resumeAt === undefined ? full : slicePlan(full, resumeAt);
     const base = resumeAt ?? 0;
     setPausedAt(null);
     setPlaying(true);
     await scorePlayer.play(plan, {
       a4: settings.a4,
-      click: withClick,
+      click: o.click ?? withClick,
+      onBeat,
       voice,
       mute: o.muteMine ?? (hasAcc && mute),
       onNote: (e, idx) => {
@@ -443,7 +455,7 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
       onEnd: () => {
         if (o.keepListening) {
           highlight(null); setPlaying(false);
-          endTimer.current = setTimeout(() => { endTimer.current = null; stopRef.current(); }, 800);
+          endTimer.current = setTimeout(() => { endTimer.current = null; stopRef.current(); }, o.acc ? 800 : 1500);
           return;
         }
         if (loopRef.current) playRangeRef.current(); else { highlight(null); setPlaying(false); }
@@ -485,7 +497,11 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
     if (recOn) { try { await recorder.start(settings.a4); } catch { /* 녹음 못 해도 채점은 계속 */ } }
     listeningRef.current = true;
     setListening(true);
-    if (hasAcc && scoreWithAcc) { curIdx.current = 0; playRange(undefined, { keepListening: true, muteMine: true }); }
+    const withAcc = hasAcc && scoreWithAcc;
+    if (withAcc || scoreMetro !== 'off') {
+      curIdx.current = 0;
+      playRange(undefined, { keepListening: true, muteMine: true, acc: withAcc, click: scoreMetro === 'sound' ? true : scoreMetro === 'visual' ? 'visual' : false });
+    }
   }
   function stop() {
     if (!listeningRef.current) return; // 두 번 끝나지 않게
@@ -669,6 +685,17 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
         {hasAcc && !listening && (
           <label className="small"><input type="checkbox" checked={scoreWithAcc} onChange={(e) => setScoreWithAcc(e.target.checked)} data-testid="score-with-acc" /> 반주를 틀고 같이 연주하며 채점 (이어폰을 쓰면 반주 소리가 섞이지 않아요)</label>
         )}
+        {!listening && (
+          <div className="metro-pick" role="group" aria-label="채점할 때 박자">
+            <span className="small">박자</span>
+            {([['off', '끔'], ['visual', '깜빡임'], ['sound', '메트로놈 소리']] as const).map(([v, l]) => (
+              <button key={v} type="button" className={`chip ${scoreMetro === v ? 'on' : ''}`} onClick={() => setScoreMetro(v)} data-testid={`score-metro-${v}`}>{l}</button>
+            ))}
+          </div>
+        )}
+        {!listening && scoreMetro !== 'off' && (
+          <p className="hint small">재생 템포 ♩{playBpm}로 한 마디 세고 시작해요. 악보에 지금 칠 음도 따라 표시돼요.{scoreMetro === 'sound' ? ' 이어폰(유선 권장)으로 들으면 녹음에 클릭이 안 들어가요. 스피커로 들어도 채점은 클릭 소리를 빼고 해요.' : ' 소리 없이 아래 점이 박마다 깜빡여요.'}</p>
+        )}
         {pitch.error && <p className="error">{pitch.error}</p>}
         <p className="hint">템포는 상관없어요. 악보 순서대로 연주하면 음을 맞춰 보고, 음표 색으로 보여줘요. 초록 ±10센트 안, 노랑 ±20, 빨강 그 이상, 보라 다른 음, 회색 놓친 음. 박자도 함께 봐요: 내 템포에 맞춰 각 음이 일찍·늦게 들어갔는지.</p>
       </div>
@@ -822,6 +849,7 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
         <div className="float-ctl" data-testid="float-ctl" role="toolbar" aria-label="재생 조작">
           {listening ? (
             <>
+              {playing && <span ref={beatDot} className="beat-dot" data-testid="beat-dot" aria-hidden />}
               <span className="float-info"><span className="rec-dot" /> {liveDone}/{expected.length}음</span>
               <button className="primary" onClick={stop} data-testid="float-stop-score">■ 끝내고 채점</button>
             </>
@@ -835,6 +863,7 @@ function ScoreView({ score, onClose }: { score: ScoreFile; onClose: () => void }
             </>
           ) : (
             <>
+              <span ref={beatDot} className="beat-dot" aria-hidden />
               <span className="float-info">{nowMeasure ?? from}마디 · ♩{playBpm}</span>
               <button className="mini" onClick={() => setPlayBpm((b) => Math.max(30, b - 5))} aria-label="느리게">−</button>
               <button className="mini" onClick={() => setPlayBpm((b) => Math.min(200, b + 5))} aria-label="빠르게">+</button>

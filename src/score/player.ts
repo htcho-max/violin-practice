@@ -3,6 +3,7 @@ import { stringWave } from '../audio/timbre';
 import { midiToFreq } from '../audio/notes';
 import type { ParsedScore, ScoreNote } from './parse';
 import { loadViolinSamples, scheduleViolinNote } from '../audio/violinSampler';
+import { noteClick, clearClicks } from '../audio/clicks';
 
 export type Voice = 'sample' | 'synth';
 
@@ -124,7 +125,7 @@ export class ScorePlayer {
 
   async play(
     plan: Plan,
-    opts: { a4: number; click: boolean; volume?: number; voice?: Voice; onNote?: (e: PlayEvent | null, idx?: number) => void; onEnd?: () => void; mute?: boolean; accVolume?: number },
+    opts: { a4: number; click: boolean | 'visual'; onBeat?: (k: number, accent: boolean) => void; volume?: number; voice?: Voice; onNote?: (e: PlayEvent | null, idx?: number) => void; onEnd?: () => void; mute?: boolean; accVolume?: number },
   ) {
     this.stop();
     const gen = this.gen;
@@ -198,8 +199,12 @@ export class ScorePlayer {
       this.nodes.push(osc);
     }
     const firstNote = plan.events.length ? plan.events[0].time : Infinity;
-    for (const c of plan.clicks) {
+    for (const [k, c] of plan.clicks.entries()) {
+      // 눈으로 보는 박자 (깜빡임)
+      if (opts.onBeat) this.timers.push(setTimeout(() => opts.onBeat?.(k, c.accent), Math.max(0, (t0 + c.time - ctx.currentTime + lat) * 1000)));
+      if (opts.click === 'visual') continue; // 소리 없이
       if (!opts.click && c.time >= firstNote - 1e-6) continue; // 카운트인만
+      noteClick(t0 + c.time); // 음높이 분석에서 클릭 소리는 빼도록
       const osc = ctx.createOscillator();
       osc.frequency.value = c.accent ? 1760 : 1320;
       const g = ctx.createGain();
@@ -216,6 +221,7 @@ export class ScorePlayer {
 
   stop() {
     this.gen++;
+    clearClicks();
     this.timers.forEach(clearTimeout);
     this.timers = [];
     const now = this.ctx?.currentTime ?? 0;

@@ -330,3 +330,9 @@ button.mini.on { border-color: var(--accent); color: var(--accent); font-weight:
 .mark-row > .muted { min-width: 42px; }
 .mark-row .chip.dyn i { font-family: 'Times New Roman', serif; font-weight: 700; }
 .mark-input { flex: 1; min-width: 140px; }
+
+/* 채점할 때 박자 고르기, 박마다 깜빡이는 점 */
+.metro-pick { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 8px 0 4px; }
+.beat-dot { width: 16px; height: 16px; border-radius: 50%; background: var(--line, #ccc); flex: none; transition: background 0.08s, transform 0.08s; }
+.beat-dot.on { background: var(--accent, #b85a12); transform: scale(1.25); }
+.beat-dot.on.accent { background: #d93b2b; transform: scale(1.5); }
