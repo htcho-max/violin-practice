@@ -424,3 +424,5 @@ button.mini.on { border-color: var(--accent); color: var(--accent); font-weight:
 .live-pitch-row { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
 .rec-cleanup { display: flex; flex-direction: column; gap: 4px; }
 .warn-text { color: #b45309; }
+.transpose-panel { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; margin: 4px; border-radius: 10px; background: #f1f5f9; color: #1f2937; }
+.transpose-btns { display: flex; flex-wrap: wrap; gap: 6px; }

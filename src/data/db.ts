@@ -123,6 +123,8 @@ export interface ScoreFile {
   exercise?: ExerciseMeta;
   /** 내가 악보에 붙인 표시 ("마디:순서" → 활·셈여림·꺾쇠·메모) */
   marks?: import('../score/dynamics').UserMarks;
+  /** 조 옮김 (반음, + 높게). 악보 XML 은 그대로 두고 보여 줄 때·들을 때·채점할 때 옮김 */
+  transpose?: number;
   /** 앱에서 음을 고치기 전 처음 악보 (처음 고칠 때 한 번 저장) */
   origXml?: string;
   /** 목록용 가벼운 열쇠 (자동으로 채움): 악보 XML 을 읽지 않고 목록을 그리려고 인덱스에 넣음 */

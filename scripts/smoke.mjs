@@ -179,6 +179,16 @@ try {
     await page.locator('[data-testid=osmd]').screenshot({ path: 'scripts/shot-dev.png' });
     ok(/녹음/.test(await page.getByTestId('run-saved').textContent().catch(() => '')), '채점하면 연습 기록과 녹음 저장');
     ok(/연습 기록 1번/.test(await page.getByTestId('run-history').textContent().catch(() => '')), '이 악보 연습 기록 표시');
+    // 조 옮김: 반음 +2 → 첫 음 A4 가 B4 로 (악보 듣기 첫 음 표시로 확인)
+    await page.getByTestId('transpose-toggle').click();
+    await page.getByTestId('transpose-up').click(); await page.getByTestId('transpose-up').click();
+    await page.waitForTimeout(1500);
+    const keyTxt = await page.getByTestId('transpose-key').textContent().catch(() => '');
+    ok(/장조|단조/.test(keyTxt) && /\+2/.test(await page.getByTestId('transpose-toggle').textContent()), `조 옮김 +2 (${keyTxt})`);
+    const svgAfter = await page.locator('[data-testid=osmd] svg').count();
+    ok(svgAfter >= 1, '조 옮긴 악보 다시 그리기');
+    await page.getByTestId('transpose-reset').click();
+    await page.waitForTimeout(800);
     await page.getByTestId('score-result').locator('button').first().waitFor().catch(() => {});
     await page.getByTestId('run-history').locator('.rec-title').first().click();
     await page.waitForTimeout(300);

@@ -14,6 +14,7 @@ import { NoteSegmenter, equalRef } from '../audio/segment';
 import { pitchTracker } from '../audio/pitchTracker';
 import { midiName } from '../audio/notes';
 import { LivePitch } from '../components/LivePitch';
+import { transposeXml, firstKey, keyName, newFifths, semisLabel } from '../score/transpose';
 import { ScoreFollower, followScrollDelta } from '../score/follow';
 import { freqToMidiFloat } from '../audio/notes';
 import { tolFor, toneOf, TOLERANCES, type Tolerance, type ToleranceId } from '../score/tolerance';
@@ -215,18 +216,26 @@ function ScoreView({ score, onClose, initial }: { score: ScoreFile; onClose: () 
   const pieces = usePieces();
   const piece = pieces.find((p) => p.id === score.pieceId);
   const myPart = score.part ?? 0;
-  const parsed: ParsedScore = useMemo(() => parseMusicXML(score.xml, { part: myPart }), [score.xml, myPart]);
+  const tr = score.transpose ?? 0;
+  /** 조 옮김을 반영한 악보 (그리기·듣기·채점 모두 이것으로) */
+  const viewXml = useMemo(() => (tr ? transposeXml(score.xml, tr) : score.xml), [score.xml, tr]);
+  const accView = useMemo(() => (score.accXml && tr ? transposeXml(score.accXml, tr) : score.accXml), [score.accXml, tr]);
+  const parsed: ParsedScore = useMemo(() => parseMusicXML(viewXml, { part: myPart }), [viewXml, myPart]);
+  const [trOpen, setTrOpen] = useState(false);
+  const origKey = useMemo(() => firstKey(score.xml), [score.xml]);
+  const lowCount = useMemo(() => parsed.notes.filter((n) => n.midi < 55).length, [parsed]);
+  const setTranspose = (v: number) => { const t = Math.max(-12, Math.min(12, v)); setResult(null); db.scores.update(score.id!, { transpose: t || undefined }).catch(() => {}); };
   const accParts: AccPart[] = useMemo(() => {
     const out: AccPart[] = [];
-    parsed.parts.forEach((name, i) => { if (i !== myPart) { try { out.push({ score: parseMusicXML(score.xml, { part: i, allNotes: true }), inst: instFor(name) }); } catch { /* 무시 */ } } });
-    if (score.accXml) {
+    parsed.parts.forEach((name, i) => { if (i !== myPart) { try { out.push({ score: parseMusicXML(viewXml, { part: i, allNotes: true }), inst: instFor(name) }); } catch { /* 무시 */ } } });
+    if (accView) {
       try {
-        const head = parseMusicXML(score.accXml);
-        head.parts.forEach((name, i) => out.push({ score: parseMusicXML(score.accXml!, { part: i, allNotes: true }), inst: instFor(name) }));
+        const head = parseMusicXML(accView);
+        head.parts.forEach((name, i) => out.push({ score: parseMusicXML(accView!, { part: i, allNotes: true }), inst: instFor(name) }));
       } catch { /* 무시 */ }
     }
     return out;
-  }, [score.xml, score.accXml, parsed, myPart]);
+  }, [viewXml, accView, parsed, myPart]);
   const hasAcc = accParts.length > 0;
   /** 재생용: 내가 붙인 표시(활·셈여림)를 합친 악보 */
   const playParsed = useMemo(() => applyUserMarks(parsed, score.marks), [parsed, score.marks]);
@@ -359,6 +368,7 @@ function ScoreView({ score, onClose, initial }: { score: ScoreFile; onClose: () 
     return () => { ro.disconnect(); if (id) clearTimeout(id); };
   }, []);
   const osmdInit = useRef<Promise<void> | null>(null);
+  const loadedXml = useRef('');
   // 내 표시: 편집 모드, 고르는 음, 그려진 자리
   const [renderTick, setRenderTick] = useState(0);
   /** 악보 누르기 도구: 없음(누른 음부터 듣기·채점) / 내 표시 / 음 고치기 */
@@ -509,10 +519,12 @@ function ScoreView({ score, onClose, initial }: { score: ScoreFile; onClose: () 
       try {
         if (!osmdInit.current && holder.current) {
           const el = holder.current;
-          osmdInit.current = (async () => { const o = await createOSMD(el); await o.load(score.xml); osmd.current = o; })();
+          osmdInit.current = (async () => { const o = await createOSMD(el); await o.load(viewXml); loadedXml.current = viewXml; osmd.current = o; })();
         }
         await osmdInit.current;
         if (!alive || !osmd.current) return;
+        // 음 고치기·조 옮김으로 악보가 바뀌면 다시 불러오기
+        if (loadedXml.current !== viewXml) { setRendering(true); await osmd.current.load(viewXml); loadedXml.current = viewXml; if (!alive) return; }
         setRendering(true);
         setDrawRange(osmd.current, from, to);
         osmd.current.zoom = zoomView;
@@ -533,7 +545,7 @@ function ScoreView({ score, onClose, initial }: { score: ScoreFile; onClose: () 
       }
     })();
     return () => { alive = false; };
-  }, [score.xml, from, to, myPart, score.showOthers, zoomView, focus, sizeTick]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [viewXml, from, to, myPart, score.showOthers, zoomView, focus, sizeTick]); // eslint-disable-line react-hooks/exhaustive-deps
   // 음표 색: 다시 그린 뒤나 채점 결과·보기가 바뀔 때 칠하기만
   useEffect(() => { paintNotes(els.current, noteColors, holder.current ?? document); }, [noteColors, renderTick]);
 
@@ -999,6 +1011,7 @@ function ScoreView({ score, onClose, initial }: { score: ScoreFile; onClose: () 
         <span className="zoom">
           <button className={`mini ${markMode ? 'on' : ''}`} onClick={() => { setTool(markMode ? 'none' : 'mark'); setMarkKey(null); setEditKey(null); setHereKey(null); }} disabled={listening} data-testid="mark-toggle" title="음표를 눌러 활·셈여림·메모 붙이기">✎ 표시</button>
           <button className={`mini ${tool === 'edit' ? 'on' : ''}`} onClick={() => { setTool(tool === 'edit' ? 'none' : 'edit'); setMarkKey(null); setEditKey(null); setHereKey(null); }} disabled={listening} data-testid="edit-toggle" title="틀린 음을 눌러 높이·길이 고치기">♪ 음 고치기</button>
+          <button className={`mini ${trOpen || tr ? 'on' : ''}`} onClick={() => setTrOpen(!trOpen)} disabled={listening} data-testid="transpose-toggle" title="조 옮기기">♯♭ 조{tr ? ` ${tr > 0 ? '+' : ''}${tr}` : ''}</button>
           <button className={`mini ${focus ? 'on' : ''}`} onClick={() => setFocus(!focus)} data-testid="focus-toggle">{focus ? '메뉴 보기' : '악보만'}</button>
           <button className="mini" onClick={() => setZoom((z) => Math.max(0.5, Math.round((z - 0.1) * 10) / 10))} aria-label="악보 작게">가−</button>
           <button className="mini" onClick={() => setZoom(1)} aria-label="악보 기본 크기">{Math.round(zoom * 100)}%</button>
@@ -1008,6 +1021,20 @@ function ScoreView({ score, onClose, initial }: { score: ScoreFile; onClose: () 
       <div className="score-sheet">
         {rendering && <p className="muted small">악보를 그리는 중…</p>}
         {renderError && <p className="error">{renderError}</p>}
+        {trOpen && (
+          <div className="transpose-panel" data-testid="transpose-panel">
+            <span className="small"><b>{keyName(origKey.fifths, origKey.mode)}</b>{tr ? <> → <b data-testid="transpose-key">{keyName(newFifths(origKey.fifths, tr), origKey.mode)}</b> ({semisLabel(tr)})</> : ' (원래 조)'}</span>
+            <span className="transpose-btns">
+              <button className="mini" onClick={() => setTranspose(tr - 12)} disabled={tr <= -12} aria-label="한 옥타브 낮게">옥타브 −</button>
+              <button className="mini" onClick={() => setTranspose(tr - 1)} disabled={tr <= -12} aria-label="반음 낮게" data-testid="transpose-down">♭ 반음 −</button>
+              <button className="mini" onClick={() => setTranspose(0)} disabled={!tr} data-testid="transpose-reset">원래 조</button>
+              <button className="mini" onClick={() => setTranspose(tr + 1)} disabled={tr >= 12} aria-label="반음 높게" data-testid="transpose-up">♯ 반음 +</button>
+              <button className="mini" onClick={() => setTranspose(tr + 12)} disabled={tr >= 12} aria-label="한 옥타브 높게">옥타브 +</button>
+            </span>
+            {lowCount > 0 && <span className="small warn-text">바이올린 최저음(G3)보다 낮은 음이 {lowCount}개 있어요.</span>}
+            <span className="muted small">악보 파일은 그대로 두고 보기·듣기·채점만 옮겨요. 반주도 같이 옮겨요.</span>
+          </div>
+        )}
         {markMode && <p className="hint mark-hint">음표를 누르면 활·셈여림·메모를 붙여요. 다 했으면 ✎ 표시를 다시 눌러요.</p>}
         {tool === 'edit' && (
           <p className="hint mark-hint">틀린 음표를 누르면 높이·길이를 고쳐요. 고친 악보는 이 기기에만 저장돼요.
