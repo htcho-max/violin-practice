@@ -76,6 +76,8 @@ export interface ScoreRun {
   /** 진행 중인 연습 세션 안에서 했는지 (그러면 시간은 세션에 이미 들어 있음) */
   inSession: boolean;
   recordingId?: number;
+  /** 녹음 자동 정리로 녹음만 지웠음 */
+  recCleared?: boolean;
   /** 가장 벗어난 마디 몇 개 */
   weakMeasures?: number[];
   /** 음마다 결과 (약한 마디·음정 습관·셈여림 비교에 씀) */

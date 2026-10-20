@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { applyCleanup } from '../data/cleanup';
+import { RecCleanup } from '../components/RecCleanup';
 import { liveQuery } from 'dexie';
 import { db, type Recording, type ScoreRun } from '../data/db';
 import { runText } from '../state/useScoreRuns';
@@ -167,6 +169,7 @@ export function Recordings() {
           <button className={filter === 'free' ? 'on' : ''} onClick={() => setFilter('free')}>자유 녹음</button>
         </div>
         {shown.length === 0 && <p className="muted small">아직 녹음이 없어요.</p>}
+        {recs.some((r) => r.scoreId) && <RecCleanup />}
         <ul className="rec-list">
           {shown.map((r) => (
             <li key={r.id}>
@@ -176,7 +179,7 @@ export function Recordings() {
                   <b>{r.title}</b>
                   <span className="muted small">{r.scoreId ? '악보 · ' : ''}{new Date(r.createdAt).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })} · {clock(r.durationSec)}</span>
                 </button>
-                <button className="mini danger" onClick={() => { if (confirm('이 녹음을 지울까요?')) db.recordings.delete(r.id!); }} aria-label="녹음 삭제">✕</button>
+                <button className="mini danger" onClick={() => { if (confirm('이 녹음을 지울까요? (채점 기록은 남아요)')) applyCleanup([r.id!]); }} aria-label="녹음 삭제">✕</button>
               </div>
               {open === r.id && (
                 <div className="rec-body">

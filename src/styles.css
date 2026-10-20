@@ -422,3 +422,5 @@ button.mini.on { border-color: var(--accent); color: var(--accent); font-weight:
 .live-pitch.compact .lp-name { font-size: 16px; }
 @media (max-width: 420px) { .live-pitch .lp-cents { display: none; } }
 .live-pitch-row { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+.rec-cleanup { display: flex; flex-direction: column; gap: 4px; }
+.warn-text { color: #b45309; }

@@ -7,6 +7,7 @@ import { localDate } from '../data/dates';
 import { currentPieces } from '../data/pieces';
 import { usePieces } from '../state/usePieces';
 import { setAudioStatus } from '../state/audioStatus';
+import { NumField } from './NumField';
 
 interface Props { bpm: number; setBpm: (b: number) => void; running: boolean }
 
@@ -22,6 +23,8 @@ export function TempoTrainer({ bpm, setBpm, running }: Props) {
   const ladder = useRef<TempoLadder | null>(null);
   const [, force] = useState(0);
   const [message, setMessage] = useState('');
+  /** 펼침: 끝내도 접히지 않게 (결과·다음 설정을 바로 보도록) */
+  const [open, setOpen] = useState(false);
   const startedAt = useRef(0);
   const firstBar = useRef(true);
   const L = ladder.current;
@@ -87,31 +90,32 @@ export function TempoTrainer({ bpm, setBpm, running }: Props) {
   }
   function miss() { ladder.current?.fail(); force((n) => n + 1); }
 
-  const num = (v: number, set: (n: number) => void, label: string, min = 1, max = 250) => (
-    <label className="num-field"><span>{label}</span>
-      <input className="num" type="number" min={min} max={max} value={v} onChange={(e) => set(Number(e.target.value))} disabled={!!L} />
-    </label>
+  // 다 지우고 새로 칠 수 있게 (입력 중에 범위로 바로 고치지 않음), −/+ 로 한 칸씩
+  const num = (v: number, set: (n: number) => void, label: string, min = 1, max = 250, stepBy = 1, testId?: string) => (
+    <div className="num-field"><span>{label}</span>
+      <NumField value={v} min={min} max={max} step={stepBy} onChange={set} label={label} width={52} disabled={!!L} testId={testId} />
+    </div>
   );
   const choices = currentPieces(pieces);
 
   return (
-    <details className="card trainer" open={!!L}>
+    <details className="card trainer" open={open || !!L} onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)}>
       <summary className="card-summary"><b>템포 트레이너</b> <span className="muted">{L ? `진행 중 ♩${L.bpm}` : '느리게 시작해 조금씩 올리기'}</span></summary>
       <select value={pieceId} onChange={(e) => setPieceId(e.target.value)} disabled={!!L} aria-label="곡">
         <option value="">곡 선택 안 함</option>
         {choices.map((p) => <option key={p.id} value={p.id}>{p.title}{p.currentBpm ? ` (♩${p.currentBpm})` : ''}</option>)}
       </select>
       <div className="num-row">
-        {num(start, (n) => { touched.current.start = true; setStart(clampBpm(n)); }, '시작 ♩', 30)}
-        {num(target, (n) => { touched.current.target = true; setTarget(clampBpm(n)); }, '목표 ♩', 30)}
-        {num(step, (n) => setStep(Math.max(1, Math.min(20, n))), '올림')}
+        {num(start, (n) => { touched.current.start = true; setStart(clampBpm(n)); }, '시작 ♩', 30, 250, 2, 'ladder-from')}
+        {num(target, (n) => { touched.current.target = true; setTarget(clampBpm(n)); }, '목표 ♩', 30, 250, 2, 'ladder-to')}
+        {num(step, setStep, '올림', 1, 20)}
       </div>
       <div className="segmented small">
         <button className={mode === 'success' ? 'on' : ''} onClick={() => setMode('success')} disabled={!!L}>성공 횟수마다</button>
         <button className={mode === 'bars' ? 'on' : ''} onClick={() => setMode('bars')} disabled={!!L}>마디마다 자동</button>
       </div>
       <div className="num-row">
-        {mode === 'success' ? num(succ, (n) => setSucc(Math.max(1, Math.min(10, n))), '연속 성공') : num(bars, (n) => setBars(Math.max(1, Math.min(32, n))), '마디 수')}
+        {mode === 'success' ? num(succ, setSucc, '연속 성공', 1, 10) : num(bars, setBars, '마디 수', 1, 32)}
       </div>
 
       {L ? (
@@ -129,7 +133,10 @@ export function TempoTrainer({ bpm, setBpm, running }: Props) {
           <button className="secondary wide" onClick={() => finish('트레이너를 끝냈어요.')}>트레이너 끝내기</button>
         </div>
       ) : (
-        <button className="primary wide" onClick={begin} data-testid="ladder-start">템포 트레이너 시작</button>
+        <>
+          {start >= target && <p className="small warn-text" data-testid="ladder-warn">목표 템포를 시작 템포보다 빠르게 정해 주세요.</p>}
+          <button className="primary wide" onClick={begin} disabled={start >= target} data-testid="ladder-start">템포 트레이너 시작</button>
+        </>
       )}
       {message && <p className="small" data-testid="ladder-message">{message}</p>}
       <p className="hint">성공 모드: 구간을 깨끗하게 치면 ✓, 틀리면 ✗(횟수 초기화). 곡을 고르면 도달한 템포가 곡의 현재 템포로 저장돼요.</p>

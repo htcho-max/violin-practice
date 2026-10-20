@@ -141,7 +141,7 @@ function Calendar({ goTab }: { goTab?: (t: TabId) => void }) {
                     <div className="rec-body">
                       <RunInsightView run={r} />
                       {r.notes?.length && goTab ? <button className="secondary wide" onClick={() => { requestScore({ scoreId: r.scoreId, runId: r.id }); goTab('score'); }} data-testid="log-run-show">📊 악보에서 분석 보기</button> : null}
-                      {r.recordingId ? <RecPlayerById id={r.recordingId} /> : <p className="muted small">녹음 없이 채점만 했어요.</p>}
+                      {r.recordingId ? <RecPlayerById id={r.recordingId} /> : <p className="muted small">{r.recCleared ? '녹음은 정리했어요 (채점 기록은 그대로).' : '녹음 없이 채점만 했어요.'}</p>}
                     </div>
                   )}
                 </li>

@@ -50,6 +50,15 @@ try {
     await page.screenshot({ path: 'scripts/shot-trainer.png', fullPage: true });
     await page.getByRole('button', { name: '트레이너 끝내기' }).click();
     ok(/최고 ♩89/.test(await page.getByTestId('ladder-message').textContent()), '트레이너 결과 메시지');
+    // 시작·목표 숫자 직접 입력 (다 지우고 60, 100)
+    await page.getByTestId('ladder-from').fill('60'); await page.getByTestId('ladder-from').blur();
+    await page.getByTestId('ladder-to').fill('100'); await page.getByTestId('ladder-to').blur();
+    await page.waitForTimeout(200);
+    ok((await page.getByTestId('ladder-from').inputValue()) === '60' && (await page.getByTestId('ladder-to').inputValue()) === '100', '트레이너 시작 60 · 목표 100 입력');
+    await page.getByTestId('ladder-start').click();
+    await page.waitForTimeout(300);
+    ok((await page.getByTestId('bpm').textContent()) === '60', `트레이너 시작 템포 60 (${await page.getByTestId('bpm').textContent()})`);
+    await page.getByRole('button', { name: '트레이너 끝내기' }).click();
     await page.getByTestId('metro-toggle').click();
 
     // 곡 목록 + 1~3권 불러오기 → 오늘의 복습 곡
@@ -102,7 +111,7 @@ try {
 
     await page.reload();
     await tab(page, '메트로놈');
-    ok((await page.getByTestId('bpm').textContent()) === '89', '새로고침 후 BPM 유지');
+    ok((await page.getByTestId('bpm').textContent()) === '60', '새로고침 후 BPM 유지');
     // 백업 → 되돌리기
     await tab(page, '오늘');
     await page.getByRole('button', { name: '설정' }).click();

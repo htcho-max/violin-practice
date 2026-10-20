@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { saveBackup, restoreBackup, storageInfo } from '../data/backup';
 import { checkForUpdate } from '../state/appUpdate';
 import { NumField } from './NumField';
+import { RecCleanup } from './RecCleanup';
 import { TOLERANCES, tolFor, type ToleranceId } from '../score/tolerance';
 
 export function SettingsSheet({ onClose }: { onClose: () => void }) {
@@ -81,6 +82,7 @@ export function SettingsSheet({ onClose }: { onClose: () => void }) {
         <p className="muted small">연습 기록·악보·녹음은 이 기기의 브라우저 안에만 저장돼요. 기기를 바꾸거나 브라우저 데이터를 지우기 전에 백업해 두세요.{info ? ` 지금 ${info.usedMB < 1 ? '1MB 미만' : `${Math.round(info.usedMB)}MB`} 사용 중.` : ''}{info?.persisted === false ? ' 브라우저가 공간이 부족할 때 지울 수 있는 상태예요. 홈 화면에 앱으로 설치하면 더 안전해요.' : ''}</p>
         <button className="secondary" onClick={() => backup(false)} disabled={busy} data-testid="backup">백업 파일 만들기 (녹음 제외)</button>
         <button className="secondary" onClick={() => backup(true)} disabled={busy}>백업 파일 만들기 (녹음 포함, 파일이 커요)</button>
+        <RecCleanup onDone={() => storageInfo().then(setInfo)} />
         <input ref={file} type="file" accept="application/json,.json" hidden onChange={(e) => e.target.files?.[0] && restore(e.target.files[0])} data-testid="restore-file" />
         <button className="secondary" onClick={() => file.current?.click()} disabled={busy}>백업에서 되돌리기</button>
         {dataMsg && <p className="muted small" data-testid="data-msg">{dataMsg}</p>}

@@ -1343,7 +1343,7 @@ function RunHistory({ runs, onPick, onShow, shownId }: { runs: ScoreRun[]; onPic
                 {r.notes?.length
                   ? <button className={`secondary wide ${shownId === r.id ? 'on' : ''}`} onClick={() => onShow(r)} data-testid="run-show">📊 악보에서 분석 보기 (음표 색·높낮이·박자{r.notes.some((n) => n[5] != null) ? '·셈여림' : ''})</button>
                   : <p className="muted small">이 기록은 음마다 저장하기 전(v0.13 이전) 기록이라 요약만 있어요.</p>}
-                {r.recordingId ? <RecPlayer id={r.recordingId} /> : <p className="muted small">녹음 없이 채점만 했어요.</p>}
+                {r.recordingId ? <RecPlayer id={r.recordingId} /> : <p className="muted small">{r.recCleared ? '녹음은 정리했어요 (채점 기록은 그대로).' : '녹음 없이 채점만 했어요.'}</p>}
               </div>
             )}
           </li>
