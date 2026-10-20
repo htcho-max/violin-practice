@@ -142,3 +142,16 @@ export function paintNotes(els: Map<string, string[]>, colors: Map<string, strin
     }
   }
 }
+
+/** 그려진 줄(시스템)들의 위·아래 (악보 SVG 윗변 기준 px). 못 구하면 빈 배열 */
+export function systemRows(osmd: OpenSheetMusicDisplay): { top: number; bottom: number }[] {
+  try {
+    const unit = 10 * (osmd.zoom || 1);
+    const page = osmd.GraphicSheet?.MusicPages?.[0];
+    return (page?.MusicSystems ?? []).map((s) => {
+      const ps = s.PositionAndShape;
+      const y = ps.AbsolutePosition.y;
+      return { top: (y + ps.BorderMarginTop) * unit, bottom: (y + ps.BorderMarginBottom) * unit };
+    }).filter((r) => Number.isFinite(r.top) && r.bottom > r.top);
+  } catch { return []; }
+}

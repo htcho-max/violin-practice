@@ -150,7 +150,14 @@ try {
     await page.waitForTimeout(800);
     await page.getByTestId('score-start').click();
     const lpSeen = new Set();
-    for (let i = 0; i < 26; i++) { await page.waitForTimeout(200); for (const t of await page.getByTestId('live-pitch').allTextContents()) { const m = t.match(/^([A-G]#?\d)/); if (m) lpSeen.add(m[1]); } }
+    const follow = new Set();
+    for (let i = 0; i < 26; i++) {
+      await page.waitForTimeout(200);
+      for (const t of await page.getByTestId('live-pitch').allTextContents()) { const m = t.match(/^([A-G]#?\d)/); if (m) lpSeen.add(m[1]); }
+      follow.add(await page.evaluate(() => { const g = document.querySelector('.now-note'); return g ? Math.round(g.getBoundingClientRect().left) : -1; }));
+    }
+    follow.delete(-1);
+    ok(follow.size >= 3, `메트로놈 없이 연주 따라가기: 지금 음 표시가 ${follow.size}곳으로 옮겨 감`);
     ok(lpSeen.has('A4') && lpSeen.size >= 2, `연주 중 지금 내는 음 보기 (${[...lpSeen].join(' ')})`);
     await page.getByTestId('score-stop').click();
     await page.waitForTimeout(1200);
