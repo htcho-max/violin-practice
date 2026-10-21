@@ -3,7 +3,7 @@ import type { OpenSheetMusicDisplay } from 'opensheetmusicdisplay';
 /** 라이브러리는 악보 화면을 열 때만 불러옴 */
 export async function createOSMD(el: HTMLElement): Promise<OpenSheetMusicDisplay> {
   const { OpenSheetMusicDisplay } = await import('opensheetmusicdisplay');
-  return new OpenSheetMusicDisplay(el, {
+  const o = new OpenSheetMusicDisplay(el, {
     autoResize: false, // 크기 변화는 화면에서 직접 (재생 중 강조가 끊기지 않게)
     backend: 'svg',
     drawTitle: false,
@@ -14,6 +14,13 @@ export async function createOSMD(el: HTMLElement): Promise<OpenSheetMusicDisplay
     drawingParameters: 'compacttight',
     followCursor: false,
   });
+  // 계이름(가사 줄)은 작게, 마디가 너무 넓어지지 않게
+  const r = o.EngravingRules;
+  r.LyricsHeight = 1.5;
+  r.HorizontalBetweenLyricsDistance = 0.1;
+  r.MaximumLyricsElongationFactor = 1.4;
+  r.LyricsYMarginToBottomLine = 0.2;
+  return o;
 }
 
 type AnyNote = { NoteTie?: { StartNote?: unknown }; isRest: () => boolean };
@@ -153,5 +160,19 @@ export function systemRows(osmd: OpenSheetMusicDisplay): { top: number; bottom: 
       const y = ps.AbsolutePosition.y;
       return { top: (y + ps.BorderMarginTop) * unit, bottom: (y + ps.BorderMarginBottom) * unit };
     }).filter((r) => Number.isFinite(r.top) && r.bottom > r.top);
+  } catch { return []; }
+}
+
+/** 줄(시스템)마다 오선 맨 아랫줄 높이 (악보 SVG 윗변 기준 px). part = 내 파트 순번 */
+export function staffBottoms(osmd: OpenSheetMusicDisplay, part = 0): { top: number; bottom: number }[] {
+  try {
+    const unit = 10 * (osmd.zoom || 1);
+    const page = osmd.GraphicSheet?.MusicPages?.[0];
+    return (page?.MusicSystems ?? []).map((s) => {
+      const lines = s.StaffLines ?? [];
+      const sl = lines[Math.min(part, lines.length - 1)];
+      const y = sl ? sl.PositionAndShape.AbsolutePosition.y : s.PositionAndShape.AbsolutePosition.y;
+      return { top: y * unit, bottom: (y + 4) * unit };
+    });
   } catch { return []; }
 }

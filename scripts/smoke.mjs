@@ -239,6 +239,19 @@ try {
     ok(ptags.length >= 2 && /^1st/.test(ptags[0]), `포지션 추천 표시 (${ptags.slice(0, 6).join(' ')})`);
     await page.getByTestId('pos-fingers').uncheck();
     await page.getByTestId('pos-toggle').click();
+    // 계이름: 시험 악보(D장조) → 악보 가사 줄로 (고정 도 '라'·이동 도 '솔'·C D E 'A' 로 시작)
+    const lyr = async () => (await page.locator('[data-testid=osmd] svg text').allTextContents()).map((t) => t.trim()).filter((t) => /^([도레미파솔라시]|[A-G])[♯♭𝄪𝄫]?$/.test(t));
+    await page.getByTestId('solfa-toggle').click();
+    await page.waitForTimeout(1500);
+    const sf = await lyr();
+    await page.getByTestId('solfa-movable').click(); await page.waitForTimeout(1500);
+    const sm = await lyr();
+    await page.getByTestId('solfa-letter').click(); await page.waitForTimeout(1500);
+    const sl = await lyr();
+    ok(sf.length >= 4 && sm.length === sf.length && sl.some((t) => /^[A-G]/.test(t)) && sf.join('') !== sm.join(''), `계이름 (고정 ${sf.slice(0, 4).join(' ')} / 이동 ${sm.slice(0, 4).join(' ')} / ${sl.slice(0, 4).join(' ')})`);
+    await page.getByTestId('solfa-fixed').click();
+    await page.getByTestId('solfa-toggle').click();
+    await page.waitForTimeout(1200);
     // ♯·♭ 형광펜: D장조 시험 악보 → F♯·C♯ 칩, 칩 누르면 그 음 형광펜 빠짐
     await page.getByTestId('acc-toggle').click();
     await page.waitForTimeout(600);

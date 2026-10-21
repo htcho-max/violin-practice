@@ -476,3 +476,4 @@ button.mini.on { border-color: var(--accent); color: var(--accent); font-weight:
 .page-sub.insights > .card { grid-column: 1 / -1; }
 .page.log > .segmented button { padding-left: 2px; padding-right: 2px; white-space: nowrap; }
 @media (max-width: 380px) { .page.log > .segmented button, .page.drone > .segmented button { font-size: 13px; } }
+

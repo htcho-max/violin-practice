@@ -32,6 +32,8 @@ export interface ScoreNote {
   measure: number; index: number; midi: number; beat: number; dur: number; art?: Articulation;
   /** 임시표·조표로 바뀐 음이면 그 철자 (예 "B♭", "F♯", "E♯"). 바뀌지 않은 음은 없음 */
   acc?: string;
+  /** 음 글자 (C~B), 변화표 (−2~+2), 그때 조표 (샵+/플랫−) — 계이름 쓰기용 */
+  step?: string; alter?: number; fifths?: number;
 }
 const ACC_SIGN: Record<string, string> = { '-2': '𝄫', '-1': '♭', '1': '♯', '2': '𝄪' };
 /** <pitch> → 바뀐 음 철자 (alter 가 0 이면 undefined) */
@@ -270,11 +272,11 @@ function parseDoc(doc: Document, opt: ParseOptions): ParsedScore {
       }
       if (!isChord) { contAt = null; tieOpen = tieStart; } else if (tieStart) tieOpen = true;
       if (isChord && prev && prev.measure === num && prev.beat === start) {
-        if (midi > prev.midi) { prev.midi = midi; const a = accName(text(p, 'step'), Number(text(p, 'alter') || '0')); if (a) prev.acc = a; else delete prev.acc; if (track) els[els.length - 1] = el; } // 화음은 가장 높은 음으로 채점
+        if (midi > prev.midi) { prev.midi = midi; const a = accName(text(p, 'step'), Number(text(p, 'alter') || '0')); if (a) prev.acc = a; else delete prev.acc; prev.step = text(p, 'step'); prev.alter = Number(text(p, 'alter') || '0'); if (track) els[els.length - 1] = el; } // 화음은 가장 높은 음으로 채점
         continue;
       }
       const acc = accName(text(p, 'step'), Number(text(p, 'alter') || '0'));
-      notes.push({ measure: num, index: 0, midi, beat: start, dur, ...(art ? { art } : {}), ...(acc ? { acc } : {}) });
+      notes.push({ measure: num, index: 0, midi, beat: start, dur, ...(art ? { art } : {}), ...(acc ? { acc } : {}), step: text(p, 'step'), alter: Number(text(p, 'alter') || '0'), fifths });
       if (track) { els.push(el); tieEls.push([]); }
     }
     const whole = Array.from(m.getElementsByTagName('rest')).some((r) => r.getAttribute('measure') === 'yes');

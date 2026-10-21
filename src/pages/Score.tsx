@@ -7,7 +7,7 @@ import { markEmpty, type UserMark, type UserMarks } from '../score/dynamics';
 import { DraftInput } from '../components/DraftInput';
 import { editNote, revertMeasure, shiftMarksAfterRest, type EditOp, type NoteType } from '../score/edit';
 import { alignNotes, summarizeScore, type Played, type Scored } from '../score/align';
-import { createOSMD, colorNotes, noteElements, showParts, paintNotes, setDrawRange, systemRows } from '../score/osmd';
+import { createOSMD, colorNotes, noteElements, showParts, paintNotes, setDrawRange, systemRows, staffBottoms } from '../score/osmd';
 import { planPlayback, scorePlayer, slicePlan, instFor, type Voice, type AccPart } from '../score/player';
 import { analyzeRhythm, rhythmTone } from '../score/rhythm';
 import { NoteSegmenter, equalRef } from '../audio/segment';
@@ -15,6 +15,7 @@ import { pitchTracker } from '../audio/pitchTracker';
 import { midiName } from '../audio/notes';
 import { LivePitch } from '../components/LivePitch';
 import { sortAcc } from '../score/accidentals';
+import { withSolfa, type SolfaMode } from '../score/solfa';
 import { recommend, posLabel, type Fingering } from '../score/fingering';
 import { FullscreenButton } from '../components/FullscreenButton';
 import { transposeXml, firstKey, keyName, newFifths, semisLabel, transposedTitle, transposedCopy } from '../score/transpose';
@@ -495,6 +496,12 @@ function ScoreView({ score, onClose, initial, notice, onOpenOther }: {
     setDevPos(out);
   }, [result, view, renderTick]); // eslint-disable-line react-hooks/exhaustive-deps
   // ♯·♭ 형광펜: 음표 묶음(머리·기둥·임시표) 뒤에 노란 띠
+  // 계이름: 음표 아래 줄마다 한 줄로 (고정 도 / 이동 도 / C D E)
+  const [solfaOn, setSolfaOn] = useState(() => { try { return localStorage.getItem('violin-solfa') === '1'; } catch { return false; } });
+  const [solfaMode, setSolfaMode] = useState<SolfaMode>(() => { try { const v = localStorage.getItem('violin-solfa-mode'); return v === 'movable' || v === 'letter' ? v : 'fixed'; } catch { return 'fixed'; } });
+  useEffect(() => { try { localStorage.setItem('violin-solfa', solfaOn ? '1' : '0'); localStorage.setItem('violin-solfa-mode', solfaMode); } catch { /* 무시 */ } }, [solfaOn, solfaMode]);
+  /** 그리기용 악보: 계이름을 켜면 가사로 붙임 (듣기·채점은 viewXml 그대로) */
+  const drawXml = useMemo(() => (solfaOn ? withSolfa(viewXml, solfaMode) : viewXml), [viewXml, solfaOn, solfaMode]);
   const [accPos, setAccPos] = useState<{ key: string; x: number; y: number; w: number; h: number }[]>([]);
   useEffect(() => {
     const wrap = sheetWrap.current;
@@ -633,12 +640,12 @@ function ScoreView({ score, onClose, initial, notice, onOpenOther }: {
       try {
         if (!osmdInit.current && holder.current) {
           const el = holder.current;
-          osmdInit.current = (async () => { const o = await createOSMD(el); await o.load(viewXml); loadedXml.current = viewXml; osmd.current = o; })();
+          osmdInit.current = (async () => { const o = await createOSMD(el); await o.load(drawXml); loadedXml.current = drawXml; osmd.current = o; })();
         }
         await osmdInit.current;
         if (!alive || !osmd.current) return;
         // 음 고치기·조 옮김으로 악보가 바뀌면 다시 불러오기
-        if (loadedXml.current !== viewXml) { setRendering(true); await osmd.current.load(viewXml); loadedXml.current = viewXml; if (!alive) return; }
+        if (loadedXml.current !== drawXml) { setRendering(true); await osmd.current.load(drawXml); loadedXml.current = drawXml; if (!alive) return; }
         setRendering(true);
         setDrawRange(osmd.current, from, to);
         osmd.current.zoom = zoomView;
@@ -648,6 +655,7 @@ function ScoreView({ score, onClose, initial, notice, onOpenOther }: {
         osmd.current.render();
         els.current = noteElements(osmd.current, myPart);
         rowsRef.current = systemRows(osmd.current); lastRow.current = -1;
+        staffRef.current = staffBottoms(osmd.current, myPart);
         setRenderTick((x) => x + 1);
         lit.current = [];
         if (litKey.current) highlight(litKey.current, false); // 다시 그려도 지금 음 강조 유지
@@ -659,7 +667,7 @@ function ScoreView({ score, onClose, initial, notice, onOpenOther }: {
       }
     })();
     return () => { alive = false; };
-  }, [viewXml, from, to, myPart, score.showOthers, zoomView, focus, sizeTick]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [drawXml, from, to, myPart, score.showOthers, zoomView, focus, sizeTick]); // eslint-disable-line react-hooks/exhaustive-deps
   // 음표 색: 다시 그린 뒤나 채점 결과·보기가 바뀔 때 칠하기만
   useEffect(() => { paintNotes(els.current, noteColors, holder.current ?? document); }, [noteColors, renderTick]);
 
@@ -722,6 +730,7 @@ function ScoreView({ score, onClose, initial, notice, onOpenOther }: {
   }
   /** 지금 음이 있는 줄이 보이는 영역 위에서 2~3번째 줄에 오게 (줄이 바뀔 때만) */
   const rowsRef = useRef<{ top: number; bottom: number }[]>([]);
+  const staffRef = useRef<{ top: number; bottom: number }[]>([]);
   const lastRow = useRef(-1);
   function followScroll(el: Element) {
     const host = holder.current;
@@ -1188,6 +1197,7 @@ function ScoreView({ score, onClose, initial, notice, onOpenOther }: {
           <button className={`mini ${tool === 'edit' ? 'on' : ''}`} onClick={() => { setTool(tool === 'edit' ? 'none' : 'edit'); setMarkKey(null); setEditKey(null); setHereKey(null); }} disabled={listening} data-testid="edit-toggle" title="틀린 음을 눌러 높이·길이 고치기">♪ 음 고치기</button>
           <button className={`mini ${trOpen || tr ? 'on' : ''}`} onClick={() => setTrOpen(!trOpen)} disabled={listening} data-testid="transpose-toggle" title="조 옮기기">조 옮김{tr ? ` ${tr > 0 ? '+' : ''}${tr}` : ''}</button>
           <button className={`mini ${posOn ? 'on' : ''}`} onClick={() => setPosOn(!posOn)} data-testid="pos-toggle" title="포지션·손가락 추천">포지션</button>
+          <button className={`mini ${solfaOn ? 'on' : ''}`} onClick={() => setSolfaOn(!solfaOn)} data-testid="solfa-toggle" title="음표 아래에 계이름">계이름</button>
           <button className={`mini ${hlOn ? 'on' : ''}`} onClick={() => setHlOn(!hlOn)} data-testid="acc-toggle" title="조표·임시표로 바뀐 음(♯·♭)에 형광펜">♯♭ 표시</button>
           <FullscreenButton short />
           <button className={`mini ${focus ? 'on' : ''}`} onClick={() => setFocus(!focus)} data-testid="focus-toggle">{focus ? '메뉴 보기' : '악보만'}</button>
@@ -1202,6 +1212,14 @@ function ScoreView({ score, onClose, initial, notice, onOpenOther }: {
           {[3, 5, 7].map((p) => <button key={p} className={`chip acc-chip ${posMax === p ? 'on' : ''}`} onClick={() => setPosMax(p)} data-testid={`pos-max-${p}`}>{p}포지션</button>)}
           <label className="small"><input type="checkbox" checked={posFingers} onChange={(e) => setPosFingers(e.target.checked)} data-testid="pos-fingers" /> 손가락 번호</label>
           <span className="muted small"><span className="pos-swatch" /> 2포지션 이상 · 1st·3rd = 포지션이 바뀌는 곳{[...fingering.values()].some((v) => v === null) ? ` · 빨강 = ${posMax}포지션까지로는 안 되는 음` : ''}</span>
+        </div>
+      )}
+      {solfaOn && (
+        <div className="acc-bar" data-testid="solfa-bar">
+          <span className="muted small">계이름</span>
+          {([['fixed', '고정 도 (C=도)'], ['movable', '이동 도 (으뜸음=도)'], ['letter', 'C D E']] as const).map(([v, l]) => (
+            <button key={v} className={`chip acc-chip ${solfaMode === v ? 'on' : ''}`} onClick={() => setSolfaMode(v)} data-testid={`solfa-${v}`}>{l}</button>
+          ))}
         </div>
       )}
       {hlOn && (
