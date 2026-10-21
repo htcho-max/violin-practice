@@ -10,7 +10,7 @@ const BASE: Record<number, number> = { 0.5: 1, 1: 2, 2: 4, 3: 5, 4: 7, 5: 9, 6: 
 /** 1포지션 기준 반음 → 손가락 (1~8: 낮은1 1 낮은2 높은2 3 높은3 4 늘린4) */
 const FINGER: Record<number, number> = { 1: 1, 2: 1, 3: 2, 4: 2, 5: 3, 6: 3, 7: 4, 8: 4 };
 
-export interface FingerNote { midi: number; dur?: number; restBefore?: boolean; slurIn?: boolean; fixPos?: number; fixFinger?: number }
+export interface FingerNote { midi: number; dur?: number; restBefore?: boolean; slurIn?: boolean; fixPos?: number; fixFinger?: number; /** 내가 '여기부터 N포지션'으로 정한 자리 (다음 포지션 표시까지 이어짐) */ prefPos?: number; /** 하모닉스 (4번 손가락으로 줄 가운데를 살짝 — 3포지션에서 늘려 닿는 옥타브) */ harm?: boolean }
 export interface Fingering { string: number; pos: number; finger: number }
 export interface FingerOpts { maxPos?: number }
 
@@ -24,19 +24,23 @@ export function candidates(midi: number, maxPos = 3, fixPos?: number, fixFinger?
     if (o < 0) continue;
     if (o === 0) {
       // 개방현: 어느 포지션에서든 (포지션은 이어받음 — 아래에서 처리)
-      for (const p of positions) out.push({ string: s, pos: p, finger: 0, cost: p > 1 ? 0.3 : 0 });
+      for (const p of positions) out.push({ string: s, pos: p, finger: 0, cost: p > 1 ? 1.2 : 0 }); // 높은 포지션에서는 손가락으로 (같은 줄 음색)
       continue;
     }
     for (const p of positions) {
       const rel = o - BASE[p] + 2;
       if (rel < 1 || rel > 8) continue;
       const finger = FINGER[rel];
-      let cost = (p - 1) * 0.6 + (p === 2 ? 0.8 : 0) + (rel === 8 ? 2.2 : 0) + (rel === 1 && p > 1 ? 0.6 : 0); // 2포지션은 덜 쓰는 자리
+      let cost = (p - 1) * 0.15 + (p === 2 ? 0.5 : 0) + (rel === 8 ? 2.2 : 0) + (rel === 1 && p > 1 ? 0.6 : 0); // 2포지션은 덜 쓰는 자리
       if (finger === 4 && o === 7 && s < 3) cost += 0.15; // 4번 대신 옆 개방현도 가능
       out.push({ string: s, pos: p, finger, cost });
     }
   }
-  return out.filter((c) => (fixPos === undefined || c.finger === 0 || c.pos === fixPos) && (fixFinger === undefined || c.finger === fixFinger));
+  // 정한 포지션·손가락이 이 음으로는 안 되면 (늘림·하모닉스 등) 그 조건은 빼고
+  const byPos = out.filter((c) => fixPos === undefined || c.finger === 0 || c.pos === fixPos);
+  const p1 = byPos.length ? byPos : out;
+  const byFinger = p1.filter((c) => fixFinger === undefined || c.finger === fixFinger);
+  return byFinger.length ? byFinger : p1;
 }
 
 function transition(a: Cand, b: Cand, n: FingerNote, prev: FingerNote): number {
@@ -48,6 +52,8 @@ function transition(a: Cand, b: Cand, n: FingerNote, prev: FingerNote): number {
     if (n.slurIn) shift *= 1.3; // 이음줄 안
     c += shift;
   }
+  // 같은 음을 되풀이하면 같은 자리로
+  if (prev.midi === n.midi && (a.string !== b.string || a.pos !== b.pos)) c += 2;
   // 같은 손가락으로 다른 음을 연달아 (미끄러짐)
   if (a.finger && a.finger === b.finger && a.string === b.string && prev.midi !== n.midi) c += 0.8;
   return c;
@@ -56,7 +62,16 @@ function transition(a: Cand, b: Cand, n: FingerNote, prev: FingerNote): number {
 /** 음 목록 → 음마다 추천 (치기 어려운 음은 null) */
 export function recommend(notes: FingerNote[], opts: FingerOpts = {}): (Fingering | null)[] {
   const maxPos = opts.maxPos ?? 3;
-  const cands = notes.map((n) => candidates(n.midi, Math.max(maxPos, n.fixPos ?? 0), n.fixPos, n.fixFinger));
+  const cands = notes.map((n) => {
+    let cs = candidates(n.midi, Math.max(maxPos, n.fixPos ?? 0, n.prefPos ?? 0), n.fixPos, n.harm ? undefined : n.fixFinger);
+    // 하모닉스: 줄 한가운데(옥타브) — 3포지션에서 4번을 늘려 닿음
+    if (n.harm) {
+      const s = STRINGS.indexOf(n.midi - 12);
+      if (s >= 0) cs = [{ string: s, pos: 3, finger: 4, cost: 0 }];
+    }
+    if (n.prefPos !== undefined) cs = cs.map((c) => (c.finger && c.pos !== n.prefPos ? { ...c, cost: c.cost + 3 } : c));
+    return cs;
+  });
   const res: (Fingering | null)[] = new Array(notes.length).fill(null);
   // 칠 수 없는 음(G3 아래·너무 높음)으로 끊어 구간마다
   let i = 0;
@@ -91,4 +106,5 @@ export function recommend(notes: FingerNote[], opts: FingerOpts = {}): (Fingerin
   return res;
 }
 
-export const posLabel = (p: number) => (p === 0.5 ? '½' : ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII'][p] ?? String(p));
+/** 포지션 이름 (로마 숫자는 줄 표시로 쓰는 책이 많아 1st 2nd 3rd 로) */
+export const posLabel = (p: number) => (p === 0.5 ? '½' : `${p}${p === 1 ? 'st' : p === 2 ? 'nd' : p === 3 ? 'rd' : 'th'}`);

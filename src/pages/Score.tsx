@@ -354,9 +354,11 @@ function ScoreView({ score, onClose, initial }: { score: ScoreFile; onClose: () 
     const ns = parsed.notes;
     const abs = (n: typeof ns[number]) => (parsed.measureStart.get(n.measure) ?? 0) + n.beat;
     const um = score.marks ?? {};
+    let pref: number | undefined;
     const r = recommend(ns.map((n, i) => {
       const k = `${n.measure}:${n.index}`, prev = ns[i - 1];
-      return { midi: n.midi, dur: n.dur, slurIn: !!n.art?.slurIn, restBefore: !!prev && abs(n) - (abs(prev) + prev.dur) > 0.01, fixPos: um[k]?.pos, fixFinger: um[k]?.finger };
+      if (um[k]?.pos !== undefined) pref = um[k]!.pos; // 내 포지션 표시는 다음 표시까지 이어짐
+      return { midi: n.midi, dur: n.dur, slurIn: !!n.art?.slurIn, restBefore: !!prev && abs(n) - (abs(prev) + prev.dur) > 0.01, fixPos: um[k]?.pos, fixFinger: um[k]?.finger ?? n.art?.finger, prefPos: pref, harm: !!n.art?.harm };
     }), { maxPos: posMax });
     return new Map(ns.map((n, i) => [`${n.measure}:${n.index}`, r[i]]));
   }, [posOn, posMax, parsed, score.marks]);
@@ -494,7 +496,7 @@ function ScoreView({ score, onClose, initial }: { score: ScoreFile; onClose: () 
       if (!head || f === undefined) continue;
       const high = !!f && f.pos >= 2, none = f === null;
       const label = changed || n === expected[0] ? (f ? `${posLabel(f.pos)}` : '높음') : null;
-      const finger = posFingers && f && um[key]?.finger === undefined ? f.finger : null;
+      const finger = posFingers && f && um[key]?.finger === undefined && n.art?.finger === undefined ? f.finger : null;
       if (!high && !none && !label && finger === null) continue;
       const w = Math.max(10, head.right - head.left + 6);
       out.push({ key, x: head.left - base.left - 3, y: head.outTop - base.top - 3, w, h: head.outBottom - head.outTop + 6, top: head.outTop - base.top, cx: (head.left + head.right) / 2 - base.left, high, none, label, finger });
@@ -1099,7 +1101,7 @@ function ScoreView({ score, onClose, initial }: { score: ScoreFile; onClose: () 
           <span className="muted small">최고</span>
           {[3, 5, 7].map((p) => <button key={p} className={`chip acc-chip ${posMax === p ? 'on' : ''}`} onClick={() => setPosMax(p)} data-testid={`pos-max-${p}`}>{p}포지션</button>)}
           <label className="small"><input type="checkbox" checked={posFingers} onChange={(e) => setPosFingers(e.target.checked)} data-testid="pos-fingers" /> 손가락 번호</label>
-          <span className="muted small"><span className="pos-swatch" /> 2포지션 이상 · 로마 숫자 = 포지션이 바뀌는 곳{[...fingering.values()].some((v) => v === null) ? ` · 빨강 = ${posMax}포지션까지로는 안 되는 음` : ''}</span>
+          <span className="muted small"><span className="pos-swatch" /> 2포지션 이상 · 1st·3rd = 포지션이 바뀌는 곳{[...fingering.values()].some((v) => v === null) ? ` · 빨강 = ${posMax}포지션까지로는 안 되는 음` : ''}</span>
         </div>
       )}
       {hlOn && (
@@ -1166,7 +1168,7 @@ function ScoreView({ score, onClose, initial }: { score: ScoreFile; onClose: () 
                 {(m.bow || m.text || m.finger !== undefined || m.pos !== undefined) && (
                   <span className="mark-up" style={{ top: top - 4 }} data-testid="mark-label">
                     {m.text && <span className="mark-text">{m.text}</span>}
-                    {m.pos !== undefined && <span className="mark-pos">{m.pos === 0.5 ? '½' : m.pos}포지션</span>}
+                    {m.pos !== undefined && <span className="mark-pos">{m.pos === 0.5 ? '½' : m.pos}포지션↦</span>}
                     {m.finger !== undefined && <b className="mark-finger">{m.finger}</b>}
                     {m.bow && <b className="mark-bow">{m.bow === 'down' ? '∏' : 'V'}</b>}
                   </span>
@@ -1441,7 +1443,7 @@ function MarkSheet({ keyName, mark, onPatch, onClose }: { keyName: string; mark:
         ))}
       </div>
       <div className="mark-row">
-        <span className="muted small">포지션</span>
+        <span className="muted small" title="여기부터 이 포지션 (다음 포지션 표시까지)">포지션↦</span>
         {[0.5, 1, 2, 3, 4, 5].map((p) => (
           <button key={p} className={`chip ${mark.pos === p ? 'on' : ''}`} onClick={() => tog('pos', p)} data-testid={`mark-pos-${p}`}>{p === 0.5 ? '½' : p}</button>
         ))}

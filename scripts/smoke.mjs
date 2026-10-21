@@ -201,7 +201,7 @@ try {
     await page.getByTestId('pos-fingers').check();
     await page.waitForTimeout(600);
     const ptags = await page.getByTestId('pos-tag').allTextContents();
-    ok(ptags.length >= 2 && /^I/.test(ptags[0]), `포지션 추천 표시 (${ptags.slice(0, 6).join(' ')})`);
+    ok(ptags.length >= 2 && /^1st/.test(ptags[0]), `포지션 추천 표시 (${ptags.slice(0, 6).join(' ')})`);
     await page.getByTestId('pos-fingers').uncheck();
     await page.getByTestId('pos-toggle').click();
     // ♯·♭ 형광펜: D장조 시험 악보 → F♯·C♯ 칩, 칩 누르면 그 음 형광펜 빠짐

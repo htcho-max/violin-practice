@@ -23,6 +23,10 @@ export interface Articulation {
   orn?: { kind: 'trill' | 'mordent' | 'invmordent' | 'turn'; upper: number; lower: number };
   /** 앞에 붙은 꾸밈음 (재생 때만, 채점 안 함) */
   grace?: number[];
+  /** 악보에 인쇄된 손가락 번호 (0 = 개방현) */
+  finger?: number;
+  /** 자연 하모닉스 (o) */
+  harm?: boolean;
 }
 export interface ScoreNote {
   measure: number; index: number; midi: number; beat: number; dur: number; art?: Articulation;
@@ -133,6 +137,9 @@ function parseDoc(doc: Document, opt: ParseOptions): ParsedScore {
     if (pizz || has('pizzicato')) a.pizz = true;
     if (has('down-bow')) a.bow = 'down'; else if (has('up-bow')) a.bow = 'up';
     if (has('fermata')) a.fermata = true;
+    const fg = el.getElementsByTagName('fingering')[0]?.textContent?.trim();
+    if (fg && /^[0-4]$/.test(fg)) a.finger = Number(fg);
+    if (has('harmonic')) a.harm = true;
     const kind = has('trill-mark') ? 'trill' : has('inverted-mordent') ? 'invmordent' : has('mordent') ? 'mordent' : has('turn') ? 'turn' : null;
     const p = el.getElementsByTagName('pitch')[0];
     if (kind && p) a.orn = { kind, ...neighbors(midiOf(p), fifths) };

@@ -29,3 +29,20 @@ describe('포지션 추천', () => {
     expect(recommend([{ midi: 76, fixFinger: 4 }])[0]).toEqual({ string: 2, pos: 1, finger: 4 });
   });
 });
+
+describe('인쇄된 손가락 번호·하모닉스·포지션 표시', () => {
+  it('B4 3, G4 1 처럼 인쇄돼 있으면 3포지션(D현)으로, 손가락 없는 음도 그 자리에', () => {
+    const r = recommend([{ midi: 62, fixFinger: 0 }, { midi: 71, fixFinger: 3 }, { midi: 69 }, { midi: 67, fixFinger: 1 }, { midi: 69 }, { midi: 69 }]);
+    expect(r.slice(1).map((x) => `${x!.pos}${x!.string}${x!.finger}`)).toEqual(['313', '312', '311', '312', '312']);
+  });
+  it('하모닉스 G4 는 G현 3포지션 4번', () => {
+    expect(recommend([{ midi: 67, harm: true, fixFinger: 4 }])[0]).toEqual({ string: 0, pos: 3, finger: 4 });
+  });
+  it('"여기부터 3포지션" 표시는 다음 음들에도 이어짐', () => {
+    const r = recommend([{ midi: 67, prefPos: 3 }, { midi: 69, prefPos: 3 }, { midi: 71, prefPos: 3 }]);
+    expect(r.every((x) => x!.pos === 3)).toBe(true);
+  });
+  it('손가락으로 안 되는 음은 그 손가락 조건을 빼고 추천', () => {
+    expect(recommend([{ midi: 67, fixFinger: 4 }])[0]).not.toBeNull();
+  });
+});
