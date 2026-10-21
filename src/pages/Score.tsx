@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from 'react';
 import { liveQuery } from 'dexie';
 import type { OpenSheetMusicDisplay } from 'opensheetmusicdisplay';
 import { db, loadScoreList, type ScoreFile, type ScoreMeta } from '../data/db';
@@ -42,7 +42,7 @@ import { BOW_VARIANTS } from '../exercise/bow';
 import { STEPS, MINOR_FORMS } from '../exercise/curriculum';
 import { toRunNotes, weakSpots, ladderKey, ladderBpm, ladderStep, newLadder, LADDER_PCTS, meanDb, type DrillLadder } from '../score/practice';
 import { useDrills, saveDrill } from '../state/useDrills';
-import { takeScoreRequest, type ScoreOpenRequest } from '../state/openRequest';
+import { takeScoreRequest, requestFingering, type ScoreOpenRequest } from '../state/openRequest';
 import { useReviews, deleteScoreWithReviews } from '../state/useReviews';
 import { useToday } from '../state/useToday';
 import { measureStats, reviewChanges, reviewMessage } from '../data/review';
@@ -70,6 +70,11 @@ function useScoreFile(id: number | null): ScoreFile | null | undefined {
   }, [id]);
   return row;
 }
+
+/** 길게 누르기: 0.5초, 손가락이 10px 넘게 움직이면 취소 (스크롤). 누르는 중 표시는 0.15초 뒤부터 */
+const LP_MS = 500, LP_SHOW_MS = 150, LP_MOVE = 10;
+/** 길게 누르기 힌트: 악보를 처음 몇 번 열 때만 (한 번 써 보면 그만) */
+const LP_HINT_KEY = 'violin-longpress-hint', LP_HINT_TIMES = 3;
 
 const COLOR = { good: '#15803d', warn: '#ca8a04', bad: '#dc2626', wrong: '#7c3aed', missed: '#9ca3af' };
 const colorWith = (r: Scored, t: Tolerance) => r.status === 'missed' ? COLOR.missed : r.status === 'wrong' ? COLOR.wrong
@@ -583,6 +588,63 @@ function ScoreView({ score, onClose, initial, notice, onOpenOther }: {
     if (tool === 'mark') setMarkKey(k);
     else if (tool === 'edit') { setEditMsg(''); setEditKey(k); }
     else if (!listening && !playing) setHereKey(k);
+  }
+  // ── 음표 길게 누르기 → 운지표에서 그 음 보기 (채점 중에는 안 함) ──
+  const press = useRef<{ x: number; y: number; key: string; show: ReturnType<typeof setTimeout>; fire: ReturnType<typeof setTimeout> } | null>(null);
+  /** 길게 눌러 넘어갔으면 뒤따르는 click(짧은 탭 동작)은 무시 */
+  const longFired = useRef(false);
+  const [pressAt, setPressAt] = useState<{ key: string; x: number; y: number; r: number } | null>(null);
+  const [lpHint, setLpHint] = useState(() => { try { return Number(localStorage.getItem(LP_HINT_KEY) || 0) < LP_HINT_TIMES; } catch { return false; } });
+  const lpCounted = useRef(false);
+  useEffect(() => {
+    if (lpCounted.current || !lpHint) return;
+    lpCounted.current = true;
+    try { localStorage.setItem(LP_HINT_KEY, String(Number(localStorage.getItem(LP_HINT_KEY) || 0) + 1)); } catch { /* 무시 */ }
+  }, [lpHint]);
+  useEffect(() => () => { if (press.current) { clearTimeout(press.current.show); clearTimeout(press.current.fire); } }, []);
+  function cancelPress() {
+    if (!press.current) return;
+    clearTimeout(press.current.show); clearTimeout(press.current.fire);
+    press.current = null; setPressAt(null);
+  }
+  function onSheetDown(e: RPointerEvent) {
+    longFired.current = false;
+    cancelPress();
+    if (listening || (e.pointerType === 'mouse' && e.button !== 0)) return;
+    const key = pickNote(e.clientX, e.clientY);
+    if (!key) return;
+    const show = setTimeout(() => {
+      const wrap = sheetWrap.current, r = noteRect(key);
+      if (!wrap || !r) return;
+      const b = wrap.getBoundingClientRect();
+      setPressAt({ key, x: (r.left + r.right) / 2 - b.left, y: (r.top + r.bottom) / 2 - b.top, r: Math.max(14, (r.right - r.left) * 0.9 + 6) });
+    }, LP_SHOW_MS);
+    const fire = setTimeout(() => { press.current = null; setPressAt(null); openInChart(key); }, LP_MS);
+    press.current = { x: e.clientX, y: e.clientY, key, show, fire };
+  }
+  function onSheetMove(e: RPointerEvent) {
+    const p = press.current;
+    if (p && Math.hypot(e.clientX - p.x, e.clientY - p.y) > LP_MOVE) cancelPress();
+  }
+  /** 길게 누른 음을 운지표로: 보이는 악보(조 옮김 반영)의 음 + 자리 (포지션 추천 > 내 표시 > 인쇄된 손가락) */
+  function openInChart(key: string) {
+    const n = parsed.notes.find((x) => `${x.measure}:${x.index}` === key);
+    if (!n || listeningRef.current) return;
+    longFired.current = true;
+    try { navigator.vibrate?.(15); } catch { /* 무시 */ }
+    const f = posOn ? fingering.get(key) : undefined;
+    const um = (score.marks ?? {})[key];
+    const spot = f ? { string: f.string, pos: f.pos, finger: f.finger }
+      : um && (um.finger !== undefined || um.pos !== undefined) ? { finger: um.finger, pos: um.pos }
+      : n.art?.finger !== undefined ? { finger: n.art.finger } : undefined;
+    if (playingRef.current || pausedAt !== null) stopPlay();
+    setHereKey(null);
+    try { localStorage.setItem(LP_HINT_KEY, String(LP_HINT_TIMES)); } catch { /* 무시 */ }
+    setLpHint(false);
+    requestFingering({
+      midi: n.midi, step: n.step, alter: n.alter, fifths: n.fifths, spot,
+      back: { scoreId: score.id!, title: score.title, measure: n.measure, from, to },
+    });
   }
   /** 음 고치기 적용 (처음 고칠 때 원래 악보를 따로 둠) */
   async function applyEdit(key: string, op: EditOp) {
@@ -1261,9 +1323,14 @@ function ScoreView({ score, onClose, initial, notice, onOpenOther }: {
           <p className="hint mark-hint">틀린 음표를 누르면 높이·길이를 고쳐요. 고친 악보는 이 기기에만 저장돼요.
             {score.origXml && <button className="link small" onClick={revertAll} data-testid="edit-revert-all"> 원래 악보로 되돌리기</button>}</p>
         )}
-        {tool === 'none' && !listening && !playing && <p className="muted small tap-hint">음표를 누르면 그 마디부터 듣거나 채점할 수 있어요.</p>}
+        {/* 같은 자리에: 처음 몇 번은 길게 누르기 안내, 그다음은 누른 음부터 듣기·채점 안내 */}
+        {tool === 'none' && !listening && !playing && (lpHint
+          ? <p className="muted small tap-hint" data-testid="longpress-hint">음표를 길게 누르면 운지표에서 볼 수 있어요.</p>
+          : <p className="muted small tap-hint">음표를 누르면 그 마디부터 듣거나 채점할 수 있어요.</p>)}
         <div ref={sheetWrap} className={`sheet-wrap ${tool !== 'none' ? 'marking' : ''}`}
-          onClick={(e) => onSheetTap(e.clientX, e.clientY)} data-testid="sheet-wrap">
+          onPointerDown={onSheetDown} onPointerMove={onSheetMove} onPointerUp={cancelPress} onPointerCancel={cancelPress} onPointerLeave={cancelPress}
+          onContextMenu={(e) => { if (press.current || longFired.current) e.preventDefault(); }}
+          onClick={(e) => { if (longFired.current) { longFired.current = false; return; } onSheetTap(e.clientX, e.clientY); }} data-testid="sheet-wrap">
           <div ref={holder} data-testid="osmd" />
           <div className="mark-layer" aria-hidden>
             {posPos.map(({ key, x, y, w, h, top, cx, high, none, label, finger }) => (
@@ -1277,6 +1344,7 @@ function ScoreView({ score, onClose, initial, notice, onOpenOther }: {
                 )}
               </span>
             ))}
+            {pressAt && <span className="lp-ring" style={{ left: pressAt.x, top: pressAt.y, width: pressAt.r * 2, height: pressAt.r * 2, animationDuration: `${LP_MS - LP_SHOW_MS}ms` }} data-testid="longpress-ring" />}
             {accPos.map(({ key, x, y, w, h }) => <span key={`a${key}`} className="acc-hl" style={{ left: x, top: y, width: w, height: h }} data-testid="acc-hl" />)}
             {devPos.map(({ key, x, y, up, label, color }) => (
               <span key={`d${key}`} className={`dev-tag ${up ? 'up' : 'down'}`} style={{ left: x, top: y, color }} data-testid="dev-tag">{up ? '▲' : '▼'}{label}</span>

@@ -6,14 +6,17 @@ import { useWakeLock } from '../state/wakeLock';
 import { OPEN_STRINGS, NOTE_NAMES_KO, centsBetween, freqToNote, midiToFreq, nearestString, type OpenString } from '../audio/notes';
 import { playTone } from '../audio/tone';
 import { Fingerboard } from './Fingerboard';
+import { peekFingeringRequest } from '../state/openRequest';
+import type { TabId } from '../components/TabBar';
 
 type Mode = 'auto' | 'string';
 type View = 'tuner' | 'chart';
 const VIEW_KEY = 'violin-tuner-view';
 
 /** 튜너 탭: 튜너 | 운지표 (고른 쪽 기억) */
-export function Tuner() {
-  const [view, setView] = useState<View>(() => { try { return localStorage.getItem(VIEW_KEY) === 'chart' ? 'chart' : 'tuner'; } catch { return 'tuner'; } });
+export function Tuner({ go }: { go?: (t: TabId) => void }) {
+  // 악보에서 음표를 길게 눌러 왔으면 운지표로
+  const [view, setView] = useState<View>(() => { if (peekFingeringRequest()) return 'chart'; try { return localStorage.getItem(VIEW_KEY) === 'chart' ? 'chart' : 'tuner'; } catch { return 'tuner'; } });
   useEffect(() => { try { localStorage.setItem(VIEW_KEY, view); } catch { /* 무시 */ } }, [view]);
   return (
     <section className={`page ${view === 'chart' ? 'fc-page' : 'tuner'}`}>
@@ -21,7 +24,7 @@ export function Tuner() {
         <button className={view === 'tuner' ? 'on' : ''} onClick={() => setView('tuner')} data-testid="view-tuner">튜너</button>
         <button className={view === 'chart' ? 'on' : ''} onClick={() => setView('chart')} data-testid="view-chart">운지표</button>
       </div>
-      {view === 'tuner' ? <TunerMain /> : <Fingerboard />}
+      {view === 'tuner' ? <TunerMain /> : <Fingerboard go={go} />}
     </section>
   );
 }

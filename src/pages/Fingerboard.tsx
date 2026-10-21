@@ -5,12 +5,16 @@ import { centsBetween, freqToNote, midiToFreq } from '../audio/notes';
 import { PitchSmoother } from '../audio/smooth';
 import { planPlayback, scorePlayer } from '../score/player';
 import type { ParsedScore, ScoreNote } from '../score/parse';
-import { STRINGS, STRING_NAMES, posBase, type ChartSpot } from '../score/fingering';
+import { STRINGS, STRING_NAMES, chartSpots, posBase, type ChartSpot } from '../score/fingering';
 import { solfaName } from '../score/solfa';
 import { tolFor, toneOf } from '../score/tolerance';
 import { useSettings } from '../state/settings';
 import { usePitch } from '../state/usePitch';
 import { useWakeLock } from '../state/wakeLock';
+import { useBackLayer } from '../state/back';
+import { requestScore, takeFingeringRequest, type FingeringRequest } from '../state/openRequest';
+import type { TabId } from '../components/TabBar';
+import { chartKeyFor, chartPosFor, spelledFrom, spotFromHint } from '../violin/fromScore';
 import {
   CHART_KEYS, CHART_POSITIONS, autoBoard, enharmonic, fretPos, hitInPos, keyShape, liveString, nextInRun, noteHits, noteRows,
   positionSpots, posLabel, randomSpot, scaleRun, spell, spelledName, spotChip, spotMidi, spotTitle,
@@ -64,7 +68,7 @@ const HOLD = 0.5;
 function stepWord(n: number) { return n === 1 ? '반음' : n === 2 ? '온음' : n === 12 ? '한 옥타브' : `${n}반음`; }
 
 /** 튜너 탭 → 운지표: 음 목록(가로 줄) · 지판 · 짚어 보기를 한 화면에 */
-export function Fingerboard() {
+export function Fingerboard({ go }: { go?: (t: TabId) => void } = {}) {
   const { settings } = useSettings();
   const [prefs, setPrefs] = useState<Prefs>(loadPrefs);
   useEffect(() => { try { localStorage.setItem(PREF_KEY, JSON.stringify(prefs)); } catch { /* 무시 */ } }, [prefs]);
@@ -96,6 +100,29 @@ export function Fingerboard() {
   }, [play]);
   const selectNote = useCallback((note: Spelled) => setTarget({ midi: note.midi, note, spot: null }), [setTarget]);
   const pickSpot = (spot: ChartSpot, note: Spelled) => setTarget({ midi: note.midi, note, spot });
+
+  // ── 악보에서 음표를 길게 눌러 왔을 때: 그 음(자리)을 목표로, 조·포지션 맞추기 ──
+  const [ret, setRet] = useState<FingeringRequest['back'] | null>(null);
+  useEffect(() => {
+    const r = takeFingeringRequest();
+    if (!r) return;
+    const spot = spotFromHint(r.midi, r.spot);
+    const k = chartKeyFor(r.midi, key, r.fifths);
+    const pos = chartPosFor(r.midi, spot, prefs.pos);
+    // 음 줄에 보이도록 최고 포지션도 (자리 또는 그 음의 가장 낮은 자리까지)
+    const need = spot ? spot.pos : Math.min(...chartSpots(r.midi, 7).map((s) => s.pos), 1);
+    const maxPos = prefs.maxPos >= need ? prefs.maxPos : [1, 3, 5, 7].find((p) => p >= need) ?? 7;
+    set({ key: k === null ? 'all' : k, pos, maxPos });
+    setTarget({ midi: r.midi, note: spelledFrom(r.midi, r.step, r.alter), spot });
+    setRet(r.back ?? null);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const backToScore = () => {
+    if (!ret) return;
+    requestScore({ scoreId: ret.scoreId, measure: ret.from, to: ret.to });
+    setRet(null);
+    go?.('score');
+  };
+  useBackLayer(!!ret && !!go, backToScore);
 
   const run = useMemo(() => scaleRun(prefs.pos, key), [prefs.pos, key]);
   /** 음계 따라 짚기: 지금 조·포지션 안에서 다음 음 */
@@ -173,6 +200,9 @@ export function Fingerboard() {
 
   return (
     <div className="page-sub fingerchart">
+      {ret && go && (
+        <button className="secondary fc-back" onClick={backToScore} data-testid="fc-back-score">◀ 악보로 ({ret.title} {ret.measure}마디)</button>
+      )}
       <div className="fc-bar">
         <label className="fc-key">
           <span>조</span>

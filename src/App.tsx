@@ -13,6 +13,7 @@ import { Score } from './pages/Score';
 import { useSettings } from './state/settings';
 import { useBackLayer, setExitWarning, restoreGuard } from './state/back';
 import { useAutoFullscreen } from './state/fullscreen';
+import { onFingeringRequest } from './state/openRequest';
 
 const TITLES: Record<TabId, string> = { today: '오늘의 연습', tuner: '튜너', metronome: '메트로놈', drone: '음정 · 드론', score: '악보', log: '연습 기록' };
 
@@ -29,6 +30,8 @@ export function App({ updatedFrom = null }: { updatedFrom?: string | null }) {
   // 뒤로 가기: 설정 창 → 닫기, 다른 탭 → 오늘, 오늘에서는 한 번 안내
   useBackLayer(tab !== 'today', () => go('today'));
   useBackLayer(settingsOpen, () => setSettingsOpen(false));
+  // 악보에서 음표를 길게 누르면 튜너 탭 운지표로
+  useEffect(() => onFingeringRequest(() => go('tuner')), []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     setExitWarning(() => setToast('뒤로 버튼을 한 번 더 누르면 앱이 닫혀요'));
     const again = () => restoreGuard();
@@ -44,7 +47,7 @@ export function App({ updatedFrom = null }: { updatedFrom?: string | null }) {
         {!ready ? null : (
           <>
             {tab === 'today' && <Today go={go} openSettings={() => setSettingsOpen(true)} />}
-            {tab === 'tuner' && <Tuner />}
+            {tab === 'tuner' && <Tuner go={go} />}
             {tab === 'metronome' && <Metronome />}
             {tab === 'drone' && <Drone />}
             {tab === 'score' && <Score />}

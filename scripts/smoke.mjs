@@ -880,6 +880,62 @@ try {
     await browser.close();
   }
 
+  // ── 악보에서 음표 길게 누르기 → 운지표에서 그 음 (태블릿) · ◀ 악보로 · 뒤로 가기 · 짧은 탭은 그대로 ──
+  {
+    const { browser, page, errors } = await launch('a445.wav');
+    await page.setViewportSize({ width: 1180, height: 820 });
+    await tab(page, '악보');
+    await page.getByTestId('score-file').setInputFiles(path.resolve('scripts/test-score.musicxml'));
+    await page.waitForTimeout(1800);
+    await page.getByTestId('to').fill('2');
+    await page.waitForTimeout(1200);
+    ok(await seen(page.getByTestId('longpress-hint')), '악보 힌트: 음표를 길게 누르면 운지표');
+    const headAt = async (i) => { const h = page.locator('[data-testid=osmd] .vf-notehead').nth(i); await h.scrollIntoViewIfNeeded(); await page.waitForTimeout(300); const b = await h.boundingBox(); return b ? [b.x + b.width / 2, b.y + b.height / 2] : [0, 0]; };
+    // 셋째 음 C♯5 길게 누르기
+    let [x, y] = await headAt(2);
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.waitForTimeout(300);
+    ok(await page.getByTestId('longpress-ring').isVisible().catch(() => false), '누르는 중 음표 위 표시');
+    await page.waitForTimeout(300);
+    await page.mouse.up();
+    await page.waitForTimeout(700);
+    ok(await seen(page.getByTestId('note-list')), '길게 누르기 → 튜너 탭 운지표');
+    ok((await page.locator('.tabbar button.active').first().textContent().catch(() => '')).includes('튜너'), '튜너 탭으로');
+    ok((await page.getByTestId('practice-target').textContent()) === 'C♯5 짚기', `선택된 음 = C♯5 (${await page.getByTestId('practice-target').textContent()})`);
+    ok((await page.locator('[data-testid=note-cell][data-midi="73"]').getAttribute('aria-selected')) === 'true', '음 줄에서 C♯5 칸 고름');
+    ok((await page.getByTestId('board-hit').count()) > 0, '지판에 그 음 자리 강조');
+    ok(/◀ 악보로 \(스모크 테스트 음계 1마디\)/.test(await page.getByTestId('fc-back-score').textContent()), `◀ 악보로 (곡 이름 n마디) (${await page.getByTestId('fc-back-score').textContent()})`);
+    await page.waitForTimeout(400);
+    await shotTall(page, 'scripts/shot-longpress-tablet.png');
+    await page.getByTestId('fc-back-score').click();
+    await page.waitForTimeout(1800);
+    ok(await seen(page.getByTestId('osmd')), '◀ 악보로 → 악보 화면');
+    ok(Number(await page.getByTestId('from').inputValue()) === 1 && Number(await page.getByTestId('to').inputValue()) === 2, `같은 구간 (${await page.getByTestId('from').inputValue()}~${await page.getByTestId('to').inputValue()})`);
+    ok(!(await page.getByTestId('longpress-hint').isVisible().catch(() => false)), '한 번 써 보면 힌트 그만');
+    // 포지션 추천을 켜고 D5 길게 누르기 → 그 자리가 목표, 휴대폰 뒤로 가기 → 악보
+    await page.getByTestId('pos-toggle').click();
+    await page.waitForTimeout(800);
+    [x, y] = await headAt(3);
+    await page.mouse.move(x, y); await page.mouse.down(); await page.waitForTimeout(650); await page.mouse.up();
+    await page.waitForTimeout(800);
+    const tg = await page.getByTestId('practice-target').textContent().catch(() => '');
+    ok(/현 .*\(D5\)$/.test(tg), `포지션 추천 자리가 목표 (${tg})`);
+    await page.goBack();
+    await page.waitForTimeout(1800);
+    ok(await seen(page.getByTestId('osmd')), '휴대폰 뒤로 가기 → 악보 화면');
+    // 짧은 탭은 예전처럼 (여기부터 막대), 조금 끌기(스크롤)는 길게 누르기 아님
+    [x, y] = await headAt(4);
+    await page.mouse.click(x, y);
+    ok(await seen(page.getByTestId('here-bar')), '짧은 탭은 여기부터 막대 그대로');
+    await page.keyboard.press('Escape').catch(() => {});
+    await page.mouse.move(x, y); await page.mouse.down(); await page.mouse.move(x, y + 30, { steps: 4 }); await page.waitForTimeout(650); await page.mouse.up();
+    await page.waitForTimeout(500);
+    ok(await seen(page.getByTestId('osmd')) && !(await page.getByTestId('note-list').isVisible().catch(() => false)), '움직이면 길게 누르기 취소');
+    ok(errors.length === 0, `콘솔 오류 없음 ${errors.join(' | ')}`);
+    await browser.close();
+  }
+
   // ── 운지표 (튜너 탭 → 운지표): 음 줄(가로 스크롤) · 지판(가로/세로) · 짚어 보기 한 화면 (a445: A4 +20센트) ──
   {
     const { browser, page, errors } = await launch('a445.wav');

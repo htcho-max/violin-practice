@@ -344,6 +344,13 @@ button.mini.on { border-color: var(--accent); color: var(--accent); font-weight:
 .here-bar button { min-height: 44px; border-radius: 999px; padding: 6px 14px; white-space: nowrap; }
 .here-bar button.mini { min-width: 40px; padding: 4px 8px; }
 .tap-hint { margin: 2px 0 6px; }
+/* 음표 길게 누르기 (→ 운지표) */
+.sheet-wrap { -webkit-touch-callout: none; }
+.lp-ring { position: absolute; transform: translate(-50%, -50%) scale(.55); border-radius: 50%; pointer-events: none;
+  border: 3px solid var(--accent, #2563eb); background: color-mix(in srgb, var(--accent, #2563eb) 14%, transparent);
+  animation: lp-grow linear forwards; }
+@keyframes lp-grow { from { transform: translate(-50%, -50%) scale(.55); opacity: .5; } to { transform: translate(-50%, -50%) scale(1.15); opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .lp-ring { animation: none; transform: translate(-50%, -50%); } }
 
 /* 약한 마디 · 템포 사다리 */
 .review-here { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line); }
@@ -484,6 +491,7 @@ button.mini.on { border-color: var(--accent); color: var(--accent); font-weight:
 .fc-page { width: 100%; }
 @media (min-width: 720px) { .fc-page { max-width: 1040px; margin: 0 auto; } }
 .page-sub.fingerchart { display: flex; flex-direction: column; align-items: stretch; gap: 10px; min-width: 0; }
+.fc-back { align-self: flex-start; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fc-bar { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; }
 .fc-bar2 { justify-content: space-between; }
 .fc-key { display: flex; align-items: center; gap: 6px; }
