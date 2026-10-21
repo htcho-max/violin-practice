@@ -108,3 +108,28 @@ export function recommend(notes: FingerNote[], opts: FingerOpts = {}): (Fingerin
 
 /** 포지션 이름 (로마 숫자는 줄 표시로 쓰는 책이 많아 1st 2nd 3rd 로) */
 export const posLabel = (p: number) => (p === 0.5 ? '½' : `${p}${p === 1 ? 'st' : p === 2 ? 'nd' : p === 3 ? 'rd' : 'th'}`);
+
+/* ── 운지표용 (추천과 같은 규칙: candidates / BASE / FINGER) ── */
+/** 운지표에 쓰는 포지션 (½ 포함) */
+export const CHART_POSITIONS = [0.5, 1, 2, 3, 4, 5, 6, 7];
+/** 그 포지션에서 1번 손가락이 개방현에서 몇 반음 위인지 */
+export const posBase = (p: number) => BASE[p];
+/** 포지션 안 자리 rel(1~8: 낮은1 1 낮은2 높은2 3 높은3 4 늘린4) → 개방현에서 몇 반음, 손가락 */
+export function relSpot(pos: number, rel: number): { semis: number; finger: number } {
+  return { semis: BASE[pos] - 2 + rel, finger: FINGER[rel] };
+}
+export interface ChartSpot extends Fingering { /** 포지션 안 자리 (1~8, 개방현 0) */ rel: number; open: boolean; stretch: boolean }
+/** 한 음을 낼 수 있는 자리 모두 — 개방현은 하나로, 낮은 포지션부터 */
+export function chartSpots(midi: number, maxPos = 7): ChartSpot[] {
+  const seen = new Set<string>();
+  const out: ChartSpot[] = [];
+  for (const c of candidates(midi, maxPos)) {
+    const open = c.finger === 0;
+    const k = open ? `o${c.string}` : `${c.string}-${c.pos}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    const rel = open ? 0 : midi - STRINGS[c.string] - BASE[c.pos] + 2;
+    out.push({ string: c.string, pos: open ? 0 : c.pos, finger: c.finger, rel, open, stretch: rel === 8 });
+  }
+  return out.sort((a, b) => a.pos - b.pos || a.string - b.string);
+}

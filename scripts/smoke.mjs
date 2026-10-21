@@ -870,6 +870,93 @@ try {
     ok(errors.length === 0, `콘솔 오류 없음 ${errors.join(' | ')}`);
     await browser.close();
   }
+
+  // ── 운지표 (튜너 탭 → 운지표): 음 목록 칩 · 지판 포지션 · 조별 손 모양 · 짚어 보기 (a445: A4 +20센트) ──
+  {
+    const { browser, page, errors } = await launch('a445.wav');
+    await tab(page, '튜너');
+    await page.getByTestId('view-chart').click();
+    await page.waitForTimeout(300);
+    ok(await page.evaluate(() => localStorage.getItem('violin-tuner-view') === 'chart'), '튜너 | 운지표 바꾸기 기억 (violin-tuner-view)');
+    const chipN = () => page.getByTestId('spot-chip').count();
+    ok((await chipN()) === 228, `음 목록 칩 (반음 모두 · 7포지션까지) ${await chipN()} (기대 228)`);
+    await page.getByTestId('maxpos-1').click();
+    ok((await chipN()) === 36, `최고 포지션 1 → 칩 ${await chipN()} (기대 36)`);
+    await page.getByTestId('maxpos-7').click();
+    await page.getByTestId('chart-key').selectOption('2');
+    ok((await page.locator('.fc-row').count()) === 23 && (await chipN()) === 129, `D장조만: 음 ${await page.locator('.fc-row').count()}개 · 칩 ${await chipN()} (기대 23 · 129)`);
+    ok(/F♯4/.test(await page.getByTestId('note-list').textContent()) && !/F4/.test(await page.getByTestId('note-list').textContent()), 'D장조 철자 F♯ (F 없음)');
+    ok((await page.locator('.fc-row .mini-staff').count()) === 23, '음마다 작은 오선');
+    await page.reload();
+    await page.waitForTimeout(800);
+    await tab(page, '튜너');
+    ok(await seen(page.getByTestId('note-list')), '다시 열어도 운지표 · 음 목록');
+    ok((await page.getByTestId('chart-key').inputValue()) === '2', '고른 조 기억 (violin-fingerchart)');
+    // 지판: 포지션 바꾸기
+    await page.getByTestId('fc-board').click();
+    await page.getByTestId('pos-1').click();
+    const rowA = () => page.getByTestId('board-row-A').textContent();
+    ok(/1 B4 · 2 C♯5 · 3 D5 · 4 E5/.test(await rowA()), `지판 1포지션 A현 (${await rowA()})`);
+    await page.getByTestId('pos-3').click();
+    ok(/1 D5 · 2 E5 · 3 F♯5 · 4 G5/.test(await rowA()), `지판 3포지션 A현 (${await rowA()})`);
+    ok((await page.getByTestId('board-dot').count()) === 16, `D장조 3포지션 손가락 동그라미 ${await page.getByTestId('board-dot').count()} (기대 16)`);
+    await page.getByTestId('chart-key').selectOption('all');
+    ok((await page.getByTestId('board-dot').count()) === 32, `반음 모두: 줄마다 8자리 ${await page.getByTestId('board-dot').count()} (기대 32)`);
+    await page.screenshot({ path: 'scripts/shot-fingerboard.png', fullPage: true });
+    // 조별 손 모양
+    await page.getByTestId('fc-shape').click();
+    ok(await seen(page.getByText('손 모양은 조를 골라야 보여요')), '반음 모두면 조 고르라는 안내');
+    await page.getByTestId('chart-key').selectOption('2');
+    await page.getByTestId('pos-1').click();
+    const shE = await page.getByTestId('shape-E').textContent(), shG = await page.getByTestId('shape-G').textContent();
+    ok(shE.includes('1|2 3 4') && shE.includes('1·2 붙음'), `D장조 1포지션 E현 손 모양 (${shE})`);
+    ok(shG.includes('1 2 3|4') && shG.includes('높은 3'), `D장조 1포지션 G현 손 모양 (${shG})`);
+    // 짚어 보기: 음 목록에서 A현 개방 고르기 → 마이크 → +20센트
+    await page.getByTestId('fc-list').click();
+    await page.getByTestId('chart-key').selectOption('all');
+    await page.getByTestId('spot-chip').filter({ hasText: /^A현 개방 0$/ }).click();
+    await page.getByTestId('fc-practice').click();
+    ok((await page.getByTestId('practice-target').textContent()) === 'A현 개방 (A4)', `짚어 보기 목표 (${await page.getByTestId('practice-target').textContent()})`);
+    await page.getByTestId('practice-mic').click();
+    await page.waitForTimeout(2500);
+    const pc = num(await page.getByTestId('practice-cents').textContent());
+    ok((await page.getByTestId('practice-now').textContent()) === 'A4' && Math.abs(pc - 20) <= 3, `짚어 보기 지금 음 A4 · ${pc}센트 (기대 +20)`);
+    ok(/조금 높아요/.test(await page.getByTestId('practice-msg').textContent()), `기준(±10) 밖이면 안내 (${await page.getByTestId('practice-msg').textContent()})`);
+    ok((await page.getByTestId('practice-tally').textContent()) === '맞힘 0 / 시도 0', '아직 맞힘 없음');
+    await page.getByTestId('pos-3').click();
+    await page.getByTestId('practice-pick').click();
+    await page.waitForTimeout(800);
+    const tg = await page.getByTestId('practice-target').textContent();
+    ok(/^[GDAE]현 3포지션 \d번 \(/.test(tg), `골라 주기: 3포지션 안에서 (${tg})`);
+    ok(/반음|온음|옥타브|조금/.test(await page.getByTestId('practice-msg').textContent()), `다른 음이면 얼마나 다른지 (${await page.getByTestId('practice-msg').textContent()})`);
+    await page.screenshot({ path: 'scripts/shot-fingerpractice.png', fullPage: true });
+    // 기준 A 를 445 로 → a445 소리가 A4 ±0 → 0.5초 이어지면 맞았어요, 다음 자리
+    await page.getByTestId('view-tuner').click();
+    for (let i = 0; i < 5; i++) await page.getByRole('button', { name: '＋' }).click();
+    await page.getByTestId('view-chart').click();
+    ok(await seen(page.getByTestId('practice-target')), '운지표로 돌아오면 짚어 보기 그대로');
+    await page.getByTestId('fc-list').click();
+    await page.getByTestId('spot-chip').filter({ hasText: /^A현 개방 0$/ }).click();
+    await page.getByTestId('fc-practice').click();
+    await page.getByTestId('practice-mic').click();
+    let gotRight = false;
+    for (let i = 0; i < 40 && !gotRight; i++) { await page.waitForTimeout(100); gotRight = (await page.getByTestId('practice-msg').textContent()) === '맞았어요!'; }
+    ok(gotRight, '기준 안에서 0.5초 → 맞았어요');
+    await page.waitForTimeout(1500);
+    ok((await page.getByTestId('practice-tally').textContent()) === '맞힘 1 / 시도 1', `맞힌 수 / 시도 수 (${await page.getByTestId('practice-tally').textContent()})`);
+    ok((await page.getByTestId('practice-target').textContent()) !== 'A현 개방 (A4)', `맞히면 다음 자리 (${await page.getByTestId('practice-target').textContent()})`);
+    ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), '휴대폰: 가로 넘침 없음');
+    // 태블릿 가로
+    await page.setViewportSize({ width: 1180, height: 820 });
+    await page.getByTestId('fc-board').click();
+    await page.waitForTimeout(300);
+    const [bb, sb] = [await page.getByTestId('board').boundingBox(), await page.locator('.fc-board-side').boundingBox()];
+    ok(bb && sb && sb.x >= bb.x + bb.width - 1, '태블릿: 지판 옆에 줄별 목록');
+    await page.screenshot({ path: 'scripts/shot-fingerboard-tab.png', fullPage: true });
+    ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), '가로 넘침 없음');
+    ok(errors.length === 0, `콘솔 오류 없음 ${errors.join(' | ')}`);
+    await browser.close();
+  }
 } catch (e) {
   console.log('FAIL 예외', e.message.split('\n')[0]);
   process.exitCode = 1;

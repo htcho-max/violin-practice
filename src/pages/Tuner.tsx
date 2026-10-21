@@ -5,10 +5,28 @@ import { useSettings } from '../state/settings';
 import { useWakeLock } from '../state/wakeLock';
 import { OPEN_STRINGS, NOTE_NAMES_KO, centsBetween, freqToNote, midiToFreq, nearestString, type OpenString } from '../audio/notes';
 import { playTone } from '../audio/tone';
+import { Fingerboard } from './Fingerboard';
 
 type Mode = 'auto' | 'string';
+type View = 'tuner' | 'chart';
+const VIEW_KEY = 'violin-tuner-view';
 
+/** 튜너 탭: 튜너 | 운지표 (고른 쪽 기억) */
 export function Tuner() {
+  const [view, setView] = useState<View>(() => { try { return localStorage.getItem(VIEW_KEY) === 'chart' ? 'chart' : 'tuner'; } catch { return 'tuner'; } });
+  useEffect(() => { try { localStorage.setItem(VIEW_KEY, view); } catch { /* 무시 */ } }, [view]);
+  return (
+    <section className={`page ${view === 'chart' ? 'fc-page' : 'tuner'}`}>
+      <div className="segmented small tuner-switch">
+        <button className={view === 'tuner' ? 'on' : ''} onClick={() => setView('tuner')} data-testid="view-tuner">튜너</button>
+        <button className={view === 'chart' ? 'on' : ''} onClick={() => setView('chart')} data-testid="view-chart">운지표</button>
+      </div>
+      {view === 'tuner' ? <TunerMain /> : <Fingerboard />}
+    </section>
+  );
+}
+
+function TunerMain() {
   const { settings, update } = useSettings();
   const { reading, on, error, start, stop } = usePitch(settings.minDb);
   const [mode, setMode] = useState<Mode>('auto');
@@ -59,7 +77,7 @@ export function Tuner() {
   }
 
   return (
-    <section className="page tuner">
+    <>
       <div className="segmented">
         <button className={mode === 'auto' ? 'on' : ''} onClick={() => { setMode('auto'); stopRef0(); }}>자동</button>
         <button className={mode === 'string' ? 'on' : ''} onClick={() => setMode('string')}>현 선택</button>
@@ -98,6 +116,6 @@ export function Tuner() {
         <b>{a4} Hz</b>
         <button className="mini" onClick={() => update({ a4: Math.min(445, a4 + 1) })}>＋</button>
       </div>
-    </section>
+    </>
   );
 }
