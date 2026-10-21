@@ -15,6 +15,7 @@ import { pitchTracker } from '../audio/pitchTracker';
 import { midiName } from '../audio/notes';
 import { LivePitch } from '../components/LivePitch';
 import { sortAcc } from '../score/accidentals';
+import { FullscreenButton } from '../components/FullscreenButton';
 import { transposeXml, firstKey, keyName, newFifths, semisLabel } from '../score/transpose';
 import { ScoreFollower, followScrollDelta } from '../score/follow';
 import { freqToMidiFloat } from '../audio/notes';
@@ -1041,6 +1042,7 @@ function ScoreView({ score, onClose, initial }: { score: ScoreFile; onClose: () 
           <button className={`mini ${tool === 'edit' ? 'on' : ''}`} onClick={() => { setTool(tool === 'edit' ? 'none' : 'edit'); setMarkKey(null); setEditKey(null); setHereKey(null); }} disabled={listening} data-testid="edit-toggle" title="틀린 음을 눌러 높이·길이 고치기">♪ 음 고치기</button>
           <button className={`mini ${trOpen || tr ? 'on' : ''}`} onClick={() => setTrOpen(!trOpen)} disabled={listening} data-testid="transpose-toggle" title="조 옮기기">조 옮김{tr ? ` ${tr > 0 ? '+' : ''}${tr}` : ''}</button>
           <button className={`mini ${hlOn ? 'on' : ''}`} onClick={() => setHlOn(!hlOn)} data-testid="acc-toggle" title="조표·임시표로 바뀐 음(♯·♭)에 형광펜">♯♭ 표시</button>
+          <FullscreenButton short />
           <button className={`mini ${focus ? 'on' : ''}`} onClick={() => setFocus(!focus)} data-testid="focus-toggle">{focus ? '메뉴 보기' : '악보만'}</button>
           <button className="mini" onClick={() => setZoom((z) => Math.max(0.5, Math.round((z - 0.1) * 10) / 10))} aria-label="악보 작게">가−</button>
           <button className="mini" onClick={() => setZoom(1)} aria-label="악보 기본 크기">{Math.round(zoom * 100)}%</button>

@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { TabBar, type TabId } from './components/TabBar';
 import { StatusBar } from './components/StatusBar';
 import { SettingsSheet } from './components/SettingsSheet';
+import { FullscreenButton } from './components/FullscreenButton';
 import { Today } from './pages/Today';
 import { Tuner } from './pages/Tuner';
 import { Metronome } from './pages/Metronome';
@@ -35,7 +36,7 @@ export function App({ updatedFrom = null }: { updatedFrom?: string | null }) {
 
   return (
     <div className="app">
-      <header className="topbar"><h1>{TITLES[tab]}</h1></header>
+      <header className="topbar"><h1>{TITLES[tab]}</h1><FullscreenButton /></header>
       <StatusBar tab={tab} go={go} />
       <main>
         {!ready ? null : (

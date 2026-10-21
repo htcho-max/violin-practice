@@ -189,6 +189,13 @@ try {
     ok(svgAfter >= 1, '조 옮긴 악보 다시 그리기');
     await page.getByTestId('transpose-reset').click();
     await page.waitForTimeout(800);
+    // 전체 화면 켜고 끄기
+    await page.getByTestId('fullscreen').first().click();
+    await page.waitForTimeout(500);
+    ok(await page.evaluate(() => !!document.fullscreenElement), '전체 화면 켜기');
+    await page.getByTestId('fullscreen').first().click();
+    await page.waitForTimeout(500);
+    ok(await page.evaluate(() => !document.fullscreenElement), '전체 화면 끝내기');
     // ♯·♭ 형광펜: D장조 시험 악보 → F♯·C♯ 칩, 칩 누르면 그 음 형광펜 빠짐
     await page.getByTestId('acc-toggle').click();
     await page.waitForTimeout(600);

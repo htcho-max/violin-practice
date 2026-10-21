@@ -5,6 +5,8 @@ import { saveBackup, restoreBackup, storageInfo } from '../data/backup';
 import { checkForUpdate } from '../state/appUpdate';
 import { NumField } from './NumField';
 import { RecCleanup } from './RecCleanup';
+import { FullscreenButton } from './FullscreenButton';
+import { fsSupported, isStandalone } from '../state/fullscreen';
 import { TOLERANCES, tolFor, type ToleranceId } from '../score/tolerance';
 
 export function SettingsSheet({ onClose }: { onClose: () => void }) {
@@ -45,6 +47,11 @@ export function SettingsSheet({ onClose }: { onClose: () => void }) {
           <span>마이크 민감도 <small className="muted">(잡음이 많으면 낮추기)</small></span>
           <input type="range" min={-65} max={-30} step={1} value={-settings.minDb - 95} onChange={(e) => update({ minDb: -95 - Number(e.target.value) })} aria-label="마이크 민감도" />
           <small className="muted">{settings.minDb} dB 보다 큰 소리만 분석</small>
+        </div>
+        <div className="row-setting col">
+          <span>전체 화면 <small className="muted">(주소창·상태 표시줄 숨기기)</small></span>
+          {fsSupported() ? <FullscreenButton className="secondary" /> : <small className="muted">이 브라우저는 전체 화면을 지원하지 않아요.{isStandalone() ? '' : ' 아이폰·아이패드는 사파리 공유 버튼 → "홈 화면에 추가"로 설치하면 주소창 없이 쓸 수 있어요.'}</small>}
+          <small className="muted">화면 위 ⛶ 버튼으로도 켜고 꺼요. 끝낼 때는 ⤡ 버튼이나 뒤로 가기.</small>
         </div>
         <div className="row-setting">
           <label><input type="checkbox" checked={settings.wakeLock} onChange={(e) => update({ wakeLock: e.target.checked })} /> 연습 중 화면 꺼짐 방지</label>
