@@ -189,6 +189,18 @@ try {
     ok(svgAfter >= 1, '조 옮긴 악보 다시 그리기');
     await page.getByTestId('transpose-reset').click();
     await page.waitForTimeout(800);
+    // ♯·♭ 형광펜: D장조 시험 악보 → F♯·C♯ 칩, 칩 누르면 그 음 형광펜 빠짐
+    await page.getByTestId('acc-toggle').click();
+    await page.waitForTimeout(600);
+    const chips = await page.getByTestId('acc-chip').allTextContents();
+    const hl0 = await page.getByTestId('acc-hl').count();
+    ok(chips.length >= 1 && chips.every((c) => /[♯♭]/.test(c)) && hl0 >= 1, `♯♭ 형광펜 (칩 ${chips.join(' ')}, 표시 ${hl0}개)`);
+    await page.getByTestId('acc-chip').first().click();
+    await page.waitForTimeout(400);
+    const hl1 = await page.getByTestId('acc-hl').count();
+    ok(hl1 < hl0, `익숙한 음 빼기 (${hl0} → ${hl1})`);
+    await page.getByTestId('acc-chip').first().click();
+    await page.getByTestId('acc-toggle').click();
     await page.getByTestId('score-result').locator('button').first().waitFor().catch(() => {});
     await page.getByTestId('run-history').locator('.rec-title').first().click();
     await page.waitForTimeout(300);

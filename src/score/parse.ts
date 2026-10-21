@@ -24,7 +24,16 @@ export interface Articulation {
   /** 앞에 붙은 꾸밈음 (재생 때만, 채점 안 함) */
   grace?: number[];
 }
-export interface ScoreNote { measure: number; index: number; midi: number; beat: number; dur: number; art?: Articulation }
+export interface ScoreNote {
+  measure: number; index: number; midi: number; beat: number; dur: number; art?: Articulation;
+  /** 임시표·조표로 바뀐 음이면 그 철자 (예 "B♭", "F♯", "E♯"). 바뀌지 않은 음은 없음 */
+  acc?: string;
+}
+const ACC_SIGN: Record<string, string> = { '-2': '𝄫', '-1': '♭', '1': '♯', '2': '𝄪' };
+/** <pitch> → 바뀐 음 철자 (alter 가 0 이면 undefined) */
+export function accName(step: string, alter: number): string | undefined {
+  return alter ? `${step}${ACC_SIGN[String(alter)] ?? (alter > 0 ? '♯' : '♭')}` : undefined;
+}
 export interface ParsedScore {
   title: string;
   measures: number[];
@@ -232,10 +241,11 @@ function parseDoc(doc: Document, opt: ParseOptions): ParsedScore {
       }
       if (!isChord) { contAt = null; tieOpen = tieStart; } else if (tieStart) tieOpen = true;
       if (isChord && prev && prev.measure === num && prev.beat === start) {
-        if (midi > prev.midi) { prev.midi = midi; if (track) els[els.length - 1] = el; } // 화음은 가장 높은 음으로 채점
+        if (midi > prev.midi) { prev.midi = midi; const a = accName(text(p, 'step'), Number(text(p, 'alter') || '0')); if (a) prev.acc = a; else delete prev.acc; if (track) els[els.length - 1] = el; } // 화음은 가장 높은 음으로 채점
         continue;
       }
-      notes.push({ measure: num, index: 0, midi, beat: start, dur, ...(art ? { art } : {}) });
+      const acc = accName(text(p, 'step'), Number(text(p, 'alter') || '0'));
+      notes.push({ measure: num, index: 0, midi, beat: start, dur, ...(art ? { art } : {}), ...(acc ? { acc } : {}) });
       if (track) { els.push(el); tieEls.push([]); }
     }
     const whole = Array.from(m.getElementsByTagName('rest')).some((r) => r.getAttribute('measure') === 'yes');

@@ -14,6 +14,7 @@ import { NoteSegmenter, equalRef } from '../audio/segment';
 import { pitchTracker } from '../audio/pitchTracker';
 import { midiName } from '../audio/notes';
 import { LivePitch } from '../components/LivePitch';
+import { sortAcc } from '../score/accidentals';
 import { transposeXml, firstKey, keyName, newFifths, semisLabel } from '../score/transpose';
 import { ScoreFollower, followScrollDelta } from '../score/follow';
 import { freqToMidiFloat } from '../audio/notes';
@@ -335,6 +336,12 @@ function ScoreView({ score, onClose, initial }: { score: ScoreFile; onClose: () 
   useEffect(() => () => scorePlayer.stop(), []);
 
   const expected = useMemo(() => notesInRange(parsed, from, to), [parsed, from, to]);
+  // 조표·임시표로 바뀐 음(♯·♭) 형광펜 표시. 익숙한 음은 칩을 눌러 빼기
+  const [hlOn, setHlOn] = useState(() => { try { return localStorage.getItem('violin-acc-hl') === '1'; } catch { return false; } });
+  useEffect(() => { try { localStorage.setItem('violin-acc-hl', hlOn ? '1' : '0'); } catch { /* 무시 */ } }, [hlOn]);
+  const [accSkip, setAccSkip] = useState<string[]>(() => { try { return JSON.parse(localStorage.getItem('violin-acc-skip') || '[]'); } catch { return []; } });
+  useEffect(() => { try { localStorage.setItem('violin-acc-skip', JSON.stringify(accSkip)); } catch { /* 무시 */ } }, [accSkip]);
+  const accNames = useMemo(() => sortAcc([...new Set(expected.map((n) => n.acc).filter((x): x is string => !!x))]), [expected]);
 
   const rhythm = useMemo(() => (result ? analyzeRhythm(parsed, result) : null), [result, parsed]);
   const noteColors = useMemo(() => {
@@ -428,6 +435,27 @@ function ScoreView({ score, onClose, initial }: { score: ScoreFile; onClose: () 
     }
     setDevPos(out);
   }, [result, view, renderTick]); // eslint-disable-line react-hooks/exhaustive-deps
+  // ♯·♭ 형광펜: 음표 묶음(머리·기둥·임시표) 뒤에 노란 띠
+  const [accPos, setAccPos] = useState<{ key: string; x: number; y: number; w: number; h: number }[]>([]);
+  useEffect(() => {
+    const wrap = sheetWrap.current;
+    if (!wrap || !hlOn) { setAccPos([]); return; }
+    const base = wrap.getBoundingClientRect();
+    const skip = new Set(accSkip);
+    const out: typeof accPos = [];
+    for (const n of expected) {
+      if (!n.acc || skip.has(n.acc)) continue;
+      const key = `${n.measure}:${n.index}`;
+      const head = noteRect(key);
+      if (!head) continue;
+      const id = (els.current.get(key) ?? [])[0];
+      const g = id ? (document.getElementById(id) ?? document.getElementById(`vf-${id}`))?.getBoundingClientRect() : undefined;
+      const top = Math.min(head.top, g?.top ?? head.top), bottom = Math.max(head.bottom, g?.bottom ?? head.bottom);
+      const w = Math.max(10, head.right - head.left + 6);
+      out.push({ key, x: head.left - base.left - 3, y: top - base.top - 3, w, h: bottom - top + 6 });
+    }
+    setAccPos(out);
+  }, [hlOn, accSkip, expected, renderTick]); // eslint-disable-line react-hooks/exhaustive-deps
   // 레슨 노트가 붙은 마디: 첫 음 왼쪽 위에 📝
   const [lessonPos, setLessonPos] = useState<{ m: number; x: number; top: number; n: number }[]>([]);
   useEffect(() => {
@@ -1011,13 +1039,28 @@ function ScoreView({ score, onClose, initial }: { score: ScoreFile; onClose: () 
         <span className="zoom">
           <button className={`mini ${markMode ? 'on' : ''}`} onClick={() => { setTool(markMode ? 'none' : 'mark'); setMarkKey(null); setEditKey(null); setHereKey(null); }} disabled={listening} data-testid="mark-toggle" title="음표를 눌러 활·셈여림·메모 붙이기">✎ 표시</button>
           <button className={`mini ${tool === 'edit' ? 'on' : ''}`} onClick={() => { setTool(tool === 'edit' ? 'none' : 'edit'); setMarkKey(null); setEditKey(null); setHereKey(null); }} disabled={listening} data-testid="edit-toggle" title="틀린 음을 눌러 높이·길이 고치기">♪ 음 고치기</button>
-          <button className={`mini ${trOpen || tr ? 'on' : ''}`} onClick={() => setTrOpen(!trOpen)} disabled={listening} data-testid="transpose-toggle" title="조 옮기기">♯♭ 조{tr ? ` ${tr > 0 ? '+' : ''}${tr}` : ''}</button>
+          <button className={`mini ${trOpen || tr ? 'on' : ''}`} onClick={() => setTrOpen(!trOpen)} disabled={listening} data-testid="transpose-toggle" title="조 옮기기">조 옮김{tr ? ` ${tr > 0 ? '+' : ''}${tr}` : ''}</button>
+          <button className={`mini ${hlOn ? 'on' : ''}`} onClick={() => setHlOn(!hlOn)} data-testid="acc-toggle" title="조표·임시표로 바뀐 음(♯·♭)에 형광펜">♯♭ 표시</button>
           <button className={`mini ${focus ? 'on' : ''}`} onClick={() => setFocus(!focus)} data-testid="focus-toggle">{focus ? '메뉴 보기' : '악보만'}</button>
           <button className="mini" onClick={() => setZoom((z) => Math.max(0.5, Math.round((z - 0.1) * 10) / 10))} aria-label="악보 작게">가−</button>
           <button className="mini" onClick={() => setZoom(1)} aria-label="악보 기본 크기">{Math.round(zoom * 100)}%</button>
           <button className="mini" onClick={() => setZoom((z) => Math.min(2, Math.round((z + 0.1) * 10) / 10))} aria-label="악보 크게">가+</button>
         </span>
       </div>
+      {hlOn && (
+        <div className="acc-bar" data-testid="acc-bar">
+          {accNames.length === 0 ? <span className="muted small">이 구간에는 ♯·♭이 붙는 음이 없어요.</span> : (
+            <>
+              <span className="muted small">형광펜</span>
+              {accNames.map((a) => {
+                const off = accSkip.includes(a);
+                return <button key={a} className={`chip acc-chip ${off ? '' : 'on'}`} onClick={() => setAccSkip(off ? accSkip.filter((x) => x !== a) : [...accSkip, a])} aria-pressed={!off} data-testid="acc-chip">{a}</button>;
+              })}
+              <span className="muted small">익숙한 음은 눌러서 빼요</span>
+            </>
+          )}
+        </div>
+      )}
       <div className="score-sheet">
         {rendering && <p className="muted small">악보를 그리는 중…</p>}
         {renderError && <p className="error">{renderError}</p>}
@@ -1045,6 +1088,7 @@ function ScoreView({ score, onClose, initial }: { score: ScoreFile; onClose: () 
           onClick={(e) => onSheetTap(e.clientX, e.clientY)} data-testid="sheet-wrap">
           <div ref={holder} data-testid="osmd" />
           <div className="mark-layer" aria-hidden>
+            {accPos.map(({ key, x, y, w, h }) => <span key={`a${key}`} className="acc-hl" style={{ left: x, top: y, width: w, height: h }} data-testid="acc-hl" />)}
             {devPos.map(({ key, x, y, up, label, color }) => (
               <span key={`d${key}`} className={`dev-tag ${up ? 'up' : 'down'}`} style={{ left: x, top: y, color }} data-testid="dev-tag">{up ? '▲' : '▼'}{label}</span>
             ))}
