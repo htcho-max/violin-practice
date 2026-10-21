@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { chartSpots, relSpot, recommend } from '../src/score/fingering';
+import { STRINGS } from '../src/score/fingering';
 import {
-  HIGH, LOW, fretPos, keyShape, noteRows, positionSpots, randomSpot, spell, spelledName, spotChip, spotMidi, spotTitle,
+  HIGH, LOW, autoBoard, fretPos, hitInPos, keyShape, liveString, nextInRun, noteHits, noteRows, positionSpots, randomSpot, scaleRun,
+  spell, spelledName, spotChip, spotMidi, spotTitle, type ShapeFinger,
 } from '../src/violin/fingerchart';
 
 const chips = (midi: number, maxPos = 7) => chartSpots(midi, maxPos).map(spotChip);
@@ -82,46 +84,110 @@ describe('운지표: 포지션 자리', () => {
   });
 });
 
-describe('운지표: 조별 손 모양', () => {
+/** 손가락 간격 글자 (테스트용): 반음으로 붙으면 | */
+const pat = (fs: ShapeFinger[]) => fs.map((f, i) => (i ? (f.semis - fs[i - 1].semis === 1 ? '|' : ' ') : '') + f.finger).join('');
+const names = (fs: ShapeFinger[]) => fs.map((f) => spelledName(f.note));
+
+describe('운지표: 조별 손가락 자리 (지판 반음 막대)', () => {
   it('D장조 1포지션: E현 1|2 3 4, A현 1 2|3 4, G현 1 2 3|4', () => {
-    expect(keyShape(2, 1, 3).pattern).toBe('1|2 3 4');
-    expect(keyShape(2, 1, 3).tags[0]).toBe('1·2 붙음');
-    expect(keyShape(2, 1, 2).pattern).toBe('1 2|3 4');
-    expect(keyShape(2, 1, 2).fingers.map((f) => spelledName(f.note))).toEqual(['B4', 'C♯5', 'D5', 'E5']);
-    expect(keyShape(2, 1, 0).pattern).toBe('1 2 3|4');
-    expect(keyShape(2, 1, 0).tags).toEqual(['3·4 붙음', '높은 3']);
+    expect(pat(keyShape(2, 1, 3))).toBe('1|2 3 4');
+    expect(pat(keyShape(2, 1, 2))).toBe('1 2|3 4');
+    expect(names(keyShape(2, 1, 2))).toEqual(['B4', 'C♯5', 'D5', 'E5']);
+    expect(pat(keyShape(2, 1, 0))).toBe('1 2 3|4');
   });
-  it('다장조 1포지션 E현은 모두 온음 + 낮은 1', () => {
+  it('다장조 1포지션 E현은 모두 온음 (낮은 1)', () => {
     const s = keyShape(0, 1, 3);
-    expect(s.pattern).toBe('1 2 3 4');
-    expect(s.tags).toEqual(['모두 온음', '낮은 1']);
+    expect(pat(s)).toBe('1 2 3 4');
+    expect(s[0].rel).toBe(1);
   });
   it('다장조 2포지션 A현: C D E F = 1 2 3|4 (1번이 낮은 자리면 손 모양이 같이 내려감)', () => {
     const s = keyShape(0, 2, 2);
-    expect(s.fingers.map((f) => spelledName(f.note))).toEqual(['C5', 'D5', 'E5', 'F5']);
-    expect(s.pattern).toBe('1 2 3|4');
-    expect(s.tags).toContain('낮은 1');
-    expect(s.tags).toContain('낮은 4');
+    expect(names(s)).toEqual(['C5', 'D5', 'E5', 'F5']);
+    expect(pat(s)).toBe('1 2 3|4');
   });
-  it('A장조 3포지션 A현: D E F♯ G♯ = 1 2 3 4 (높은 3, 늘린 4 — 낮은 1 C♯ 은 뺌)', () => {
+  it('A장조 3포지션 A현: D E F♯ G♯ (높은 3, 늘린 4 — 낮은 1 C♯ 은 뺌)', () => {
     const s = keyShape(3, 3, 2);
-    expect(s.fingers.map((f) => spelledName(f.note))).toEqual(['D5', 'E5', 'F♯5', 'G♯5']);
-    expect(s.pattern).toBe('1 2 3 4');
-    expect(s.tags).toEqual(['모두 온음', '높은 3', '늘린 4']);
+    expect(names(s)).toEqual(['D5', 'E5', 'F♯5', 'G♯5']);
+    expect(s[3].rel).toBe(8);
   });
   it('A장조 1포지션 G현: A B C♯ D (G♯ 낮은 1 은 뺌)', () => {
-    expect(keyShape(3, 1, 0).fingers.map((f) => spelledName(f.note))).toEqual(['A3', 'B3', 'C♯4', 'D4']);
-  });
-  it('B♭장조는 개방 E 안 씀', () => {
-    expect(keyShape(-2, 1, 3).openInKey).toBe(false);
-    expect(keyShape(-2, 1, 2).openInKey).toBe(true);
+    expect(names(keyShape(3, 1, 0))).toEqual(['A3', 'B3', 'C♯4', 'D4']);
   });
   it('모든 조·포지션·줄에서 손가락 넷, 간격은 반음·온음', () => {
     for (const f of [0, 1, 2, 3, 4, 5, 6, -1, -2, -3, -4, -5]) for (const p of [0.5, 1, 2, 3, 4, 5, 6, 7]) for (let s = 0; s < 4; s++) {
       const sh = keyShape(f, p, s);
-      expect(sh.fingers).toHaveLength(4);
-      expect(sh.pattern).toMatch(/^1[| ]2[| ]3[| ]4$/);
+      expect(sh).toHaveLength(4);
+      expect(pat(sh)).toMatch(/^1[| ]2[| ]3[| ]4$/);
     }
+  });
+});
+
+describe('한 화면 운지표: 고른 음 자리', () => {
+  it('A4 자리: G현(5~7th) · D현(1st 4 …) · A현 개방 — 줄마다 한 곳', () => {
+    const h = noteHits(69);
+    expect(h.map((x) => x.string)).toEqual([0, 1, 2]);
+    expect(h.map((x) => x.semis)).toEqual([14, 7, 0]);
+    expect(h[2].open).toBe(true);
+    expect(h[1].spots.map((s) => s.pos)).toEqual([1, 2, 3, 4]);
+    expect(noteHits(69, 1).map((x) => x.string)).toEqual([1, 2]);
+  });
+  it('지금 포지션 안 자리 (개방현은 어느 포지션이나)', () => {
+    const [g, d, a] = noteHits(69);
+    expect(hitInPos(g, 1)).toBeNull();
+    expect(hitInPos(g, 5)!.finger).toBe(4);
+    expect(hitInPos(d, 3)!.finger).toBe(2);
+    expect(hitInPos(a, 7)!.open).toBe(true);
+    expect(noteHits(74).every((h) => h.spots.every((s) => STRINGS[h.string] + h.semis === 74))).toBe(true);
+  });
+  it('자동 지판 보기: 넓거나 가로 방향이면 가로', () => {
+    expect(autoBoard(390, false)).toBe('v');
+    expect(autoBoard(844, true)).toBe('h');
+    expect(autoBoard(720, false)).toBe('h');
+    expect(autoBoard(700, true)).toBe('h');
+  });
+});
+
+describe('실시간 점 줄 고르기', () => {
+  it('목표 줄이 정해졌으면 그 줄', () => {
+    expect(liveString(69.2, 1, 2)).toBe(2);
+    expect(liveString(80, 1, 0)).toBe(0);
+  });
+  it('아니면 지금 포지션에서 그 음을 내는 줄 (목표 자리가 있는 줄 먼저)', () => {
+    expect(liveString(71, 1, null)).toBe(2); // B4: A현 1st 1 (D현은 1st 에 안 닿음)
+    expect(liveString(74, 3, null)).toBe(2); // D5: A현 3rd 1
+    expect(liveString(69, 1, null)).toBe(1); // A4: 1포지션 D현 4 (손가락 자리 먼저)
+    expect(liveString(69, 1, null, 7, [2])).toBe(1); // 개방현 줄은 손가락 자리가 없어 그대로 D현
+    expect(liveString(62, 1, null, 7, [0])).toBe(0); // D4: G현 4 를 먼저
+    expect(liveString(76, 7, null)).toBe(1); // E5: 7th 에서 D현 2 … 가 낮은 줄
+    expect(liveString(50, 1, null)).toBeNull(); // G3 아래
+    expect(liveString(81.4, 1, null)).toBe(3); // A5 쯤: 1st 는 E현만
+  });
+});
+
+describe('음계 따라 짚기', () => {
+  it('D장조 1포지션: G3 부터 B5 까지 올라가는 음계 (개방현 포함, 늘림 빼고)', () => {
+    const r = scaleRun(1, 2);
+    expect(r.map((x) => spelledName(x.note))).toEqual([
+      'G3', 'A3', 'B3', 'C♯4', 'D4', 'E4', 'F♯4', 'G4', 'A4', 'B4', 'C♯5', 'D5', 'E5', 'F♯5', 'G5', 'A5', 'B5',
+    ]);
+    expect(r[0].open).toBe(true);
+    expect(r.find((x) => x.note.midi === 62)!.string).toBe(0); // D4 는 G현 4번 (낮은 줄 먼저)
+    expect(r.every((x) => !x.stretch)).toBe(true);
+  });
+  it('3포지션은 3포지션 자리로', () => {
+    const r = scaleRun(3, 0);
+    expect(r.filter((x) => !x.open).every((x) => x.pos === 3)).toBe(true);
+    expect(spelledName(r[r.length - 1].note)).toBe('D6');
+  });
+  it('끝에서 내려오고 맨 아래에서 다시 올라감', () => {
+    const r = scaleRun(1, 2);
+    expect(nextInRun(r, 55, 1)).toMatchObject({ item: { note: { midi: 57 } }, dir: 1 });
+    expect(nextInRun(r, 83, 1)).toMatchObject({ item: { note: { midi: 81 } }, dir: -1 });
+    expect(nextInRun(r, 55, -1)).toMatchObject({ item: { note: { midi: 57 } }, dir: 1 });
+    expect(nextInRun(r, null, 1)!.item.note.midi).toBe(55);
+    expect(nextInRun(r, 60, 1)!.item.note.midi).toBe(61); // 목록에 없는 C4 → 위 C♯4
+    expect(nextInRun(r, 90, 1)).toMatchObject({ item: { note: { midi: 83 } }, dir: -1 });
+    expect(nextInRun([], 60, 1)).toBeNull();
   });
 });
 
