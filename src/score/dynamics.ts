@@ -78,6 +78,10 @@ export interface UserMark {
   dyn?: 'pp' | 'p' | 'mp' | 'mf' | 'f' | 'ff';
   hair?: 'cresc' | 'dim' | 'end';
   text?: string;
+  /** 손가락 번호 (0 = 개방현) */
+  finger?: 0 | 1 | 2 | 3 | 4;
+  /** 포지션 (0.5 = 반 포지션) */
+  pos?: number;
 }
 export type UserMarks = Record<string, UserMark>;
-export const markEmpty = (m: UserMark | undefined) => !m || (!m.bow && !m.dyn && !m.hair && !m.text?.trim());
+export const markEmpty = (m: UserMark | undefined) => !m || (!m.bow && !m.dyn && !m.hair && !m.text?.trim() && m.finger === undefined && m.pos === undefined);

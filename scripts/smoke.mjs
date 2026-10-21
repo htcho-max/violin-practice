@@ -196,6 +196,14 @@ try {
     await page.getByTestId('fullscreen').first().click();
     await page.waitForTimeout(500);
     ok(await page.evaluate(() => !document.fullscreenElement), '전체 화면 끝내기');
+    // 포지션 추천: 시험 악보(1포지션 음) → 시작에 I 표시, 손가락 번호
+    await page.getByTestId('pos-toggle').click();
+    await page.getByTestId('pos-fingers').check();
+    await page.waitForTimeout(600);
+    const ptags = await page.getByTestId('pos-tag').allTextContents();
+    ok(ptags.length >= 2 && /^I/.test(ptags[0]), `포지션 추천 표시 (${ptags.slice(0, 6).join(' ')})`);
+    await page.getByTestId('pos-fingers').uncheck();
+    await page.getByTestId('pos-toggle').click();
     // ♯·♭ 형광펜: D장조 시험 악보 → F♯·C♯ 칩, 칩 누르면 그 음 형광펜 빠짐
     await page.getByTestId('acc-toggle').click();
     await page.waitForTimeout(600);
@@ -232,11 +240,14 @@ try {
     ok(await seen(page.getByTestId('mark-sheet')), '표시 모드에서 음표를 누르면 표시 창');
     await page.getByTestId('mark-down').click();
     await page.getByTestId('mark-dyn-p').click();
+    await page.getByTestId('mark-finger-3').click();
+    await page.getByTestId('mark-pos-3').click();
     await page.waitForTimeout(400);
     await page.getByTestId('mark-close').click();
     await page.waitForTimeout(300);
     const labels = await page.getByTestId('mark-label').allTextContents();
     ok(labels.join(' ').includes('∏') && labels.join(' ').includes('p'), `악보 위 내 표시 (${labels.join(' / ')})`);
+    ok(/3포지션/.test(labels.join(' ')) && /3/.test(labels.join(' ')), `내 표시 손가락·포지션 (${labels.join(' / ')})`);
     await page.getByTestId('mark-toggle').click();
     await page.reload();
     await page.waitForTimeout(800);

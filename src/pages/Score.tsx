@@ -15,6 +15,7 @@ import { pitchTracker } from '../audio/pitchTracker';
 import { midiName } from '../audio/notes';
 import { LivePitch } from '../components/LivePitch';
 import { sortAcc } from '../score/accidentals';
+import { recommend, posLabel, type Fingering } from '../score/fingering';
 import { FullscreenButton } from '../components/FullscreenButton';
 import { transposeXml, firstKey, keyName, newFifths, semisLabel } from '../score/transpose';
 import { ScoreFollower, followScrollDelta } from '../score/follow';
@@ -343,6 +344,22 @@ function ScoreView({ score, onClose, initial }: { score: ScoreFile; onClose: () 
   const [accSkip, setAccSkip] = useState<string[]>(() => { try { return JSON.parse(localStorage.getItem('violin-acc-skip') || '[]'); } catch { return []; } });
   useEffect(() => { try { localStorage.setItem('violin-acc-skip', JSON.stringify(accSkip)); } catch { /* 무시 */ } }, [accSkip]);
   const accNames = useMemo(() => sortAcc([...new Set(expected.map((n) => n.acc).filter((x): x is string => !!x))]), [expected]);
+  // 포지션 추천 (내 표시의 손가락·포지션을 따름)
+  const [posOn, setPosOn] = useState(() => { try { return localStorage.getItem('violin-pos-on') === '1'; } catch { return false; } });
+  const [posMax, setPosMax] = useState(() => { try { return Number(localStorage.getItem('violin-pos-max')) || 3; } catch { return 3; } });
+  const [posFingers, setPosFingers] = useState(() => { try { return localStorage.getItem('violin-pos-fingers') === '1'; } catch { return false; } });
+  useEffect(() => { try { localStorage.setItem('violin-pos-on', posOn ? '1' : '0'); localStorage.setItem('violin-pos-max', String(posMax)); localStorage.setItem('violin-pos-fingers', posFingers ? '1' : '0'); } catch { /* 무시 */ } }, [posOn, posMax, posFingers]);
+  const fingering = useMemo(() => {
+    if (!posOn) return new Map<string, Fingering | null>();
+    const ns = parsed.notes;
+    const abs = (n: typeof ns[number]) => (parsed.measureStart.get(n.measure) ?? 0) + n.beat;
+    const um = score.marks ?? {};
+    const r = recommend(ns.map((n, i) => {
+      const k = `${n.measure}:${n.index}`, prev = ns[i - 1];
+      return { midi: n.midi, dur: n.dur, slurIn: !!n.art?.slurIn, restBefore: !!prev && abs(n) - (abs(prev) + prev.dur) > 0.01, fixPos: um[k]?.pos, fixFinger: um[k]?.finger };
+    }), { maxPos: posMax });
+    return new Map(ns.map((n, i) => [`${n.measure}:${n.index}`, r[i]]));
+  }, [posOn, posMax, parsed, score.marks]);
 
   const rhythm = useMemo(() => (result ? analyzeRhythm(parsed, result) : null), [result, parsed]);
   const noteColors = useMemo(() => {
@@ -457,6 +474,33 @@ function ScoreView({ score, onClose, initial }: { score: ScoreFile; onClose: () 
     }
     setAccPos(out);
   }, [hlOn, accSkip, expected, renderTick]); // eslint-disable-line react-hooks/exhaustive-deps
+  // 포지션 추천: 높은 포지션 음에 보라 띠, 포지션이 바뀌는 음 위에 "3포지션", 손가락 번호(선택)
+  const [posPos, setPosPos] = useState<{ key: string; x: number; y: number; w: number; h: number; top: number; cx: number; high: boolean; none: boolean; label: string | null; finger: number | null }[]>([]);
+  useEffect(() => {
+    const wrap = sheetWrap.current;
+    if (!wrap || !posOn) { setPosPos([]); return; }
+    const base = wrap.getBoundingClientRect();
+    const um = score.marks ?? {};
+    const out: typeof posPos = [];
+    let last: number | null | undefined;
+    for (const n of parsed.notes) {
+      const key = `${n.measure}:${n.index}`;
+      const f = fingering.get(key);
+      const cur = f === undefined ? undefined : f ? f.pos : null;
+      const changed = cur !== last;
+      last = cur;
+      if (n.measure < from || n.measure > to) continue;
+      const head = noteRect(key);
+      if (!head || f === undefined) continue;
+      const high = !!f && f.pos >= 2, none = f === null;
+      const label = changed || n === expected[0] ? (f ? `${posLabel(f.pos)}` : '높음') : null;
+      const finger = posFingers && f && um[key]?.finger === undefined ? f.finger : null;
+      if (!high && !none && !label && finger === null) continue;
+      const w = Math.max(10, head.right - head.left + 6);
+      out.push({ key, x: head.left - base.left - 3, y: head.outTop - base.top - 3, w, h: head.outBottom - head.outTop + 6, top: head.outTop - base.top, cx: (head.left + head.right) / 2 - base.left, high, none, label, finger });
+    }
+    setPosPos(out);
+  }, [posOn, fingering, posFingers, renderTick, from, to, expected]); // eslint-disable-line react-hooks/exhaustive-deps
   // 레슨 노트가 붙은 마디: 첫 음 왼쪽 위에 📝
   const [lessonPos, setLessonPos] = useState<{ m: number; x: number; top: number; n: number }[]>([]);
   useEffect(() => {
@@ -1041,6 +1085,7 @@ function ScoreView({ score, onClose, initial }: { score: ScoreFile; onClose: () 
           <button className={`mini ${markMode ? 'on' : ''}`} onClick={() => { setTool(markMode ? 'none' : 'mark'); setMarkKey(null); setEditKey(null); setHereKey(null); }} disabled={listening} data-testid="mark-toggle" title="음표를 눌러 활·셈여림·메모 붙이기">✎ 표시</button>
           <button className={`mini ${tool === 'edit' ? 'on' : ''}`} onClick={() => { setTool(tool === 'edit' ? 'none' : 'edit'); setMarkKey(null); setEditKey(null); setHereKey(null); }} disabled={listening} data-testid="edit-toggle" title="틀린 음을 눌러 높이·길이 고치기">♪ 음 고치기</button>
           <button className={`mini ${trOpen || tr ? 'on' : ''}`} onClick={() => setTrOpen(!trOpen)} disabled={listening} data-testid="transpose-toggle" title="조 옮기기">조 옮김{tr ? ` ${tr > 0 ? '+' : ''}${tr}` : ''}</button>
+          <button className={`mini ${posOn ? 'on' : ''}`} onClick={() => setPosOn(!posOn)} data-testid="pos-toggle" title="포지션·손가락 추천">포지션</button>
           <button className={`mini ${hlOn ? 'on' : ''}`} onClick={() => setHlOn(!hlOn)} data-testid="acc-toggle" title="조표·임시표로 바뀐 음(♯·♭)에 형광펜">♯♭ 표시</button>
           <FullscreenButton short />
           <button className={`mini ${focus ? 'on' : ''}`} onClick={() => setFocus(!focus)} data-testid="focus-toggle">{focus ? '메뉴 보기' : '악보만'}</button>
@@ -1049,6 +1094,14 @@ function ScoreView({ score, onClose, initial }: { score: ScoreFile; onClose: () 
           <button className="mini" onClick={() => setZoom((z) => Math.min(2, Math.round((z + 0.1) * 10) / 10))} aria-label="악보 크게">가+</button>
         </span>
       </div>
+      {posOn && (
+        <div className="acc-bar pos-bar" data-testid="pos-bar">
+          <span className="muted small">최고</span>
+          {[3, 5, 7].map((p) => <button key={p} className={`chip acc-chip ${posMax === p ? 'on' : ''}`} onClick={() => setPosMax(p)} data-testid={`pos-max-${p}`}>{p}포지션</button>)}
+          <label className="small"><input type="checkbox" checked={posFingers} onChange={(e) => setPosFingers(e.target.checked)} data-testid="pos-fingers" /> 손가락 번호</label>
+          <span className="muted small"><span className="pos-swatch" /> 2포지션 이상 · 로마 숫자 = 포지션이 바뀌는 곳{[...fingering.values()].some((v) => v === null) ? ` · 빨강 = ${posMax}포지션까지로는 안 되는 음` : ''}</span>
+        </div>
+      )}
       {hlOn && (
         <div className="acc-bar" data-testid="acc-bar">
           {accNames.length === 0 ? <span className="muted small">이 구간에는 ♯·♭이 붙는 음이 없어요.</span> : (
@@ -1090,6 +1143,17 @@ function ScoreView({ score, onClose, initial }: { score: ScoreFile; onClose: () 
           onClick={(e) => onSheetTap(e.clientX, e.clientY)} data-testid="sheet-wrap">
           <div ref={holder} data-testid="osmd" />
           <div className="mark-layer" aria-hidden>
+            {posPos.map(({ key, x, y, w, h, top, cx, high, none, label, finger }) => (
+              <span key={`p${key}`}>
+                {(high || none) && <span className={`pos-hl ${none ? 'none' : ''}`} style={{ left: x, top: y, width: w, height: h }} data-testid="pos-hl" />}
+                {(label || finger !== null) && (
+                  <span className="pos-tag" style={{ left: cx, top: top - 2 }} data-testid="pos-tag">
+                    {label && <span className={`pos-label ${none ? 'none' : ''}`}>{label}</span>}
+                    {finger !== null && <b className="pos-finger">{finger}</b>}
+                  </span>
+                )}
+              </span>
+            ))}
             {accPos.map(({ key, x, y, w, h }) => <span key={`a${key}`} className="acc-hl" style={{ left: x, top: y, width: w, height: h }} data-testid="acc-hl" />)}
             {devPos.map(({ key, x, y, up, label, color }) => (
               <span key={`d${key}`} className={`dev-tag ${up ? 'up' : 'down'}`} style={{ left: x, top: y, color }} data-testid="dev-tag">{up ? '▲' : '▼'}{label}</span>
@@ -1099,9 +1163,11 @@ function ScoreView({ score, onClose, initial }: { score: ScoreFile; onClose: () 
             ))}
             {markPos.map(({ key, x, top, bottom, m }) => (
               <div key={key} className={`mark-at ${markKey === key ? 'sel' : ''}`} style={{ left: x }}>
-                {(m.bow || m.text) && (
+                {(m.bow || m.text || m.finger !== undefined || m.pos !== undefined) && (
                   <span className="mark-up" style={{ top: top - 4 }} data-testid="mark-label">
                     {m.text && <span className="mark-text">{m.text}</span>}
+                    {m.pos !== undefined && <span className="mark-pos">{m.pos === 0.5 ? '½' : m.pos}포지션</span>}
+                    {m.finger !== undefined && <b className="mark-finger">{m.finger}</b>}
                     {m.bow && <b className="mark-bow">{m.bow === 'down' ? '∏' : 'V'}</b>}
                   </span>
                 )}
@@ -1369,13 +1435,25 @@ function MarkSheet({ keyName, mark, onPatch, onClose }: { keyName: string; mark:
         <button className={`chip ${mark.hair === 'end' ? 'on' : ''}`} onClick={() => tog('hair', 'end')} data-testid="mark-hair-end">⊣ 여기까지</button>
       </div>
       <div className="mark-row">
+        <span className="muted small">손가락</span>
+        {([0, 1, 2, 3, 4] as const).map((f) => (
+          <button key={f} className={`chip ${mark.finger === f ? 'on' : ''}`} onClick={() => tog('finger', f)} data-testid={`mark-finger-${f}`}>{f === 0 ? '0 개방' : f}</button>
+        ))}
+      </div>
+      <div className="mark-row">
+        <span className="muted small">포지션</span>
+        {[0.5, 1, 2, 3, 4, 5].map((p) => (
+          <button key={p} className={`chip ${mark.pos === p ? 'on' : ''}`} onClick={() => tog('pos', p)} data-testid={`mark-pos-${p}`}>{p === 0.5 ? '½' : p}</button>
+        ))}
+      </div>
+      <div className="mark-row">
         <span className="muted small">메모</span>
         <DraftInput value={mark.text ?? ''} onCommit={(v) => onPatch({ text: v.trim() ? v.trim().slice(0, 30) : undefined })} label="메모" placeholder="예: 활 끝까지, 4번" className="mark-input" />
       </div>
       <div className="session-controls">
         <button className="danger" onClick={() => onPatch(null)} data-testid="mark-clear">이 음 표시 지우기</button>
       </div>
-      <p className="hint">파란 글씨가 내 표시예요. 활·셈여림·꺾쇠는 악보 듣기에도 반영돼요.</p>
+      <p className="hint">파란 글씨가 내 표시예요. 활·셈여림·꺾쇠는 악보 듣기에도, 손가락·포지션은 포지션 추천에도 반영돼요.</p>
     </div>
   );
 }
