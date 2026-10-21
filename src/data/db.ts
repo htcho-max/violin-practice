@@ -101,6 +101,39 @@ export interface LessonNote {
 }
 export interface KV { key: string; value: unknown }
 
+/** 따라 하기 한 문제의 기록 */
+export interface EchoRun {
+  id?: number;
+  createdAt: number;
+  date: string;
+  /** 조 id (G, Dm …) · 난이도 id */
+  key: string;
+  level: string;
+  /** 구절 음 (midi) */
+  notes: number[];
+  /** 맞힌 음 수 / 구절 길이 */
+  hits: number;
+  expected: number;
+  /** 맞힌 음의 평균 음정 오차 (센트, 절댓값) */
+  meanAbs: number | null;
+}
+
+/** 복습함: 채점에서 틀린 마디 (내 악보만). box 가 오를수록 간격이 길어지고, 끝까지 가면 졸업 */
+export interface ReviewItem {
+  /** `${scoreId}:${measure}` */
+  id: string;
+  scoreId: number;
+  measure: number;
+  title: string;
+  box: number;
+  /** 다음 복습 날 (YYYY-MM-DD) */
+  due: string;
+  added: string;
+  last?: string;
+  lastPct?: number;
+  lastCents?: number | null;
+}
+
 /** 사용자가 직접 불러온 악보 (이 기기에만 저장, 앱·저장소에는 포함하지 않음) */
 export interface ScoreFile {
   id?: number;
@@ -148,6 +181,8 @@ class PracticeDB extends Dexie {
   scores!: Table<ScoreFile, number>;
   scoreRuns!: Table<ScoreRun, number>;
   lessonNotes!: Table<LessonNote, number>;
+  reviews!: Table<ReviewItem, string>;
+  echoRuns!: Table<EchoRun, number>;
   constructor() {
     super('violin-practice');
     this.version(1).stores({
@@ -167,6 +202,10 @@ class PracticeDB extends Dexie {
     // 목록을 XML 없이 읽기: listKey 인덱스의 열쇠만 읽음
     this.version(7).stores({ scores: '++id, createdAt, pieceId, exercise.stepId, listKey' }).upgrade((tx) =>
       tx.table('scores').toCollection().modify((s: ScoreFile) => { s.listKey = scoreListKey(s); }));
+    // 복습함 (틀린 마디를 간격을 늘려 가며 다시)
+    this.version(8).stores({ reviews: 'id, due, scoreId' });
+    // 따라 하기 기록
+    this.version(9).stores({ echoRuns: '++id, date, createdAt' });
     // 악보를 넣거나 고칠 때 listKey 를 늘 맞춰 둠 (가져오기·백업 되돌리기·폴더 옮기기 모두)
     this.scores.hook('creating', (_pk, obj) => { obj.listKey = scoreListKey(obj); });
     this.scores.hook('updating', (mods, _pk, obj) => {

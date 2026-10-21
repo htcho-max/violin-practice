@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { liveQuery } from 'dexie';
 import { db, type ExerciseProgress, type ScoreFile } from '../data/db';
-import { STAGES, STEPS, PATTERNS, POSITION_SETS, STRING_NAMES, makeExercise, type ExerciseSpec, type PatternId, type PositionSet, type Step } from '../exercise/curriculum';
+import { STAGES, STEPS, PATTERNS, POSITION_SETS, STRING_NAMES, MINOR_FORMS, scaleProgressId, sheetOctaves, makeExercise, type ExerciseSpec, type PatternId, type PositionSet, type Step } from '../exercise/curriculum';
 import { BOWINGS, RHYTHMS, type Bowing, type FingerShow } from '../exercise/build';
-import { KEYS, keyById } from '../exercise/theory';
+import { KEYS, MAJOR_KEYS, MINOR_KEYS, keyById, type MinorForm } from '../exercise/theory';
 import { BOW_BASES, BOW_KEYS, BOW_VARIANTS, bowProgressId, variantById, type BowBaseId } from '../exercise/bow';
 
 export interface ExerciseOptions { perBeat: number; bowing: Bowing; fingers: FingerShow }
@@ -55,6 +55,23 @@ export function createBow(base: BowBaseId, key: string, variant: string, o: Exer
   return createExercise('bow', { key, pattern: 'bow', positions: '1-3', base, variant: v.id }, o, 1, tempo, `${v.tip} ${b.tip}`, undefined, bowProgressId(base, key, v.id));
 }
 
+/** 장·단음계 악보 (한 장을 덮어씀). 조·형태·옥타브마다 진도는 따로 */
+export interface SheetPrefs { mode: 'major' | 'minor'; form: MinorForm; octaves: number }
+const SHEET_DEFAULT: SheetPrefs = { mode: 'major', form: 'harmonic', octaves: 2 };
+export function sheetPrefs(): SheetPrefs {
+  try { return { ...SHEET_DEFAULT, ...JSON.parse(localStorage.getItem('violin-scale-sheet') || '{}') }; } catch { return SHEET_DEFAULT; }
+}
+export const saveSheetPrefs = (p: SheetPrefs) => { try { localStorage.setItem('violin-scale-sheet', JSON.stringify(p)); } catch { /* 무시 */ } };
+export const SHEET_TIP = '교재처럼 음계를 오르내린 뒤 으뜸화음(1·3·5음)을 오르내려요. 악보 위 "♯♭ 표시"를 켜면 바뀌는 음에 형광펜이 칠해져요.';
+/** 진도 id (3옥타브가 안 되는 조는 낮춘 옥타브로) */
+export const sheetProgressId = (key: string, form: MinorForm, octaves: number) =>
+  scaleProgressId(key, keyById(key).mode === 'minor' ? form : undefined, sheetOctaves(key, octaves));
+export function createSheet(key: string, form: MinorForm, octaves: number, o: ExerciseOptions, tempo = 60): Promise<number> {
+  const minor = keyById(key).mode === 'minor';
+  const oct = sheetOctaves(key, octaves);
+  return createExercise('scales', { key, pattern: 'scaleSheet', positions: '1-3', octaves: oct, ...(minor ? { form } : {}) }, o, 1, tempo, SHEET_TIP, undefined, sheetProgressId(key, form, octaves));
+}
+
 /** 다른 탭(오늘의 연습)에서 악보 탭을 열며 연습곡을 바로 열 때 */
 let pending: (() => Promise<number>) | null = null;
 export const requestOpen = (fn: () => Promise<number>) => { pending = fn; };
@@ -92,6 +109,14 @@ export function Exercises({ onOpen, onBack }: { onOpen: (id: number) => void; on
   const bowHasKey = BOW_BASES.find((b) => b.id === bowBase)!.keys;
   const bowDone = BOW_VARIANTS.filter((v) => progress[bowProgressId(bowBase, bowKey, v.id)]?.passed).length;
   const set = (p: Partial<ExerciseOptions>) => { const n = { ...opts, ...p }; setOpts(n); saveOpts(n); };
+  const [sheet, setSheet] = useState<SheetPrefs>(sheetPrefs);
+  const setSh = (p: Partial<SheetPrefs>) => { const n = { ...sheet, ...p }; setSheet(n); saveSheetPrefs(n); };
+  async function openSheet(key: string) {
+    setError(null); setBusy(true);
+    try { onOpen(await createSheet(key, sheet.form, sheet.octaves, opts)); } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+  }
+  const sheetKeys = sheet.mode === 'major' ? MAJOR_KEYS : MINOR_KEYS;
+  const lowered = sheet.octaves === 3 ? sheetKeys.filter((k) => sheetOctaves(k.id, 3) < 3) : [];
 
   async function open(step: Step, newSeed = false) {
     setError(null); setBusy(true);
@@ -137,6 +162,32 @@ export function Exercises({ onOpen, onBack }: { onOpen: (id: number) => void; on
         </div>
         <p className="hint">에튀드는 8분음표 이상으로 만들어요. 포지션 이동 연습은 4분음표로 고정이에요.</p>
         {error && <p className="error">{error}</p>}
+      </div>
+
+      <div className="card" data-testid="sheet-card">
+        <b>장·단음계 악보 (24조)</b>
+        <p className="hint">조를 누르면 음계 악보가 열려요. 가장 낮은 G현에서 낼 수 있는 으뜸음부터 시작해요. 악보 화면에서 이전·다음 조로 바로 넘어갈 수 있어요. 리듬·활은 위 설정을 따라요.</p>
+        <div className="segmented small">
+          <button className={sheet.mode === 'major' ? 'on' : ''} onClick={() => setSh({ mode: 'major' })} data-testid="sheet-major">장조</button>
+          <button className={sheet.mode === 'minor' ? 'on' : ''} onClick={() => setSh({ mode: 'minor' })} data-testid="sheet-minor">단조</button>
+        </div>
+        {sheet.mode === 'minor' && (
+          <div className="segmented small">
+            {MINOR_FORMS.map((f) => <button key={f.id} className={sheet.form === f.id ? 'on' : ''} onClick={() => setSh({ form: f.id })} data-testid={`sheet-form-${f.id}`}>{f.label}단음계</button>)}
+          </div>
+        )}
+        <div className="row-setting">
+          <span>높이</span>
+          {[1, 2, 3].map((n) => <button key={n} className={`chip ${sheet.octaves === n ? 'on' : ''}`} onClick={() => setSh({ octaves: n })} data-testid={`sheet-oct-${n}`}>{n}옥타브</button>)}
+        </div>
+        <div className="chips sheet-keys">
+          {sheetKeys.map((k) => {
+            const pr = progress[sheetProgressId(k.id, sheet.form, sheet.octaves)];
+            return <button key={k.id} className={`chip ${pr?.passed ? 'passed' : ''}`} onClick={() => openSheet(k.id)} disabled={busy} data-testid={`sheet-${k.id}`}>{pr?.passed ? '✓ ' : ''}{k.name}</button>;
+          })}
+        </div>
+        {lowered.length > 0 && <p className="hint">{lowered.map((k) => k.name).join('·')}는 3옥타브가 E7을 넘어서 2옥타브로 만들어요.</p>}
+        {sheet.mode === 'minor' && <p className="hint">자연단음계는 조표 그대로, 화성단음계는 7음을, 가락단음계는 올라갈 때 6·7음을 올려요(내려올 때는 자연).</p>}
       </div>
 
       {STAGES.map((st) => (

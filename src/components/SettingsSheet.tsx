@@ -6,12 +6,13 @@ import { checkForUpdate } from '../state/appUpdate';
 import { NumField } from './NumField';
 import { RecCleanup } from './RecCleanup';
 import { FullscreenButton } from './FullscreenButton';
-import { fsSupported, isStandalone } from '../state/fullscreen';
+import { fsSupported, isStandalone, appFullscreen, fullscreenPref, setFullscreenPref, enterFullscreen } from '../state/fullscreen';
 import { TOLERANCES, tolFor, type ToleranceId } from '../score/tolerance';
 
 export function SettingsSheet({ onClose }: { onClose: () => void }) {
   const { settings, update } = useSettings();
   const [updateMsg, setUpdateMsg] = useState('');
+  const [fsPref, setFsPref] = useState(fullscreenPref);
 
   const [busy, setBusy] = useState(false);
   const [dataMsg, setDataMsg] = useState('');
@@ -50,8 +51,13 @@ export function SettingsSheet({ onClose }: { onClose: () => void }) {
         </div>
         <div className="row-setting col">
           <span>전체 화면 <small className="muted">(주소창·상태 표시줄 숨기기)</small></span>
-          {fsSupported() ? <FullscreenButton className="secondary" /> : <small className="muted">이 브라우저는 전체 화면을 지원하지 않아요.{isStandalone() ? '' : ' 아이폰·아이패드는 사파리 공유 버튼 → "홈 화면에 추가"로 설치하면 주소창 없이 쓸 수 있어요.'}</small>}
-          <small className="muted">화면 위 ⛶ 버튼으로도 켜고 꺼요. 끝낼 때는 ⤡ 버튼이나 뒤로 가기.</small>
+          {appFullscreen() ? <small className="muted">앱이 이미 전체 화면으로 열려 있어요.</small>
+            : fsSupported() ? <>
+              <FullscreenButton className="secondary" />
+              <label><input type="checkbox" checked={fsPref} onChange={(e) => { setFsPref(e.target.checked); setFullscreenPref(e.target.checked); if (e.target.checked) void enterFullscreen(); }} data-testid="fullscreen-setting" /> 열 때 전체 화면으로</label>
+              <small className="muted">켜 두면 앱을 열거나 다른 앱에서 돌아온 뒤 처음 누를 때 전체 화면이 돼요{isStandalone() ? ' (홈 화면 앱도 같아요)' : ''}. 화면 위 ⛶ 버튼으로도 켜고 꺼요. 끝낼 때는 ⤡ 버튼이나 뒤로 가기.</small>
+            </>
+            : <small className="muted">이 브라우저는 전체 화면을 지원하지 않아요.{isStandalone() ? '' : ' 아이폰·아이패드는 사파리 공유 버튼 → "홈 화면에 추가"로 설치하면 주소창 없이 쓸 수 있어요.'}</small>}
         </div>
         <div className="row-setting">
           <label><input type="checkbox" checked={settings.wakeLock} onChange={(e) => update({ wakeLock: e.target.checked })} /> 연습 중 화면 꺼짐 방지</label>

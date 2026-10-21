@@ -143,6 +143,41 @@ try {
     const arr = await page.getByTestId('arrival-table').textContent();
     ok(/D5\+2\d/.test(arr) && /고쳐 잡음/.test(arr), '이동 뒤 D5 도착 +2x → 고쳐 잡음 표시');
     await page.screenshot({ path: 'scripts/shot-arrival.png', fullPage: true });
+    // 따라 하기 (앱이 들려준 구절을 따라 켜기)
+    await page.getByTestId('mode-echo').click();
+    ok(await seen(page.getByTestId('echo-card')), '음정 탭에 따라 하기');
+    ok(/G3 A3 B3/.test(await page.getByTestId('echo-card').textContent()), '기본: G장조 세 음 (G3 A3 B3)');
+    await page.getByTestId('echo-key').selectOption('D');
+    await page.getByTestId('echo-level-five').click();
+    ok(/D4 E4 F♯4 G4 A4/.test(await page.getByTestId('echo-card').textContent()), 'D장조 다섯 음 (조 철자 F♯)');
+    ok((await page.getByTestId('echo-len').textContent()) === '3', '처음 3음');
+    await page.getByTestId('echo-new').click();
+    await page.waitForFunction(() => /따라 켜요/.test(document.querySelector('[data-testid=echo-phase]')?.textContent ?? ''), null, { timeout: 10000 }).catch(() => {});
+    ok(/따라 켜요/.test(await page.getByTestId('echo-phase').textContent()), '구절을 들려준 뒤 듣기');
+    await page.waitForTimeout(1500);
+    await page.getByTestId('echo-stop').click({ timeout: 3000 }).catch(() => {});
+    ok(await seen(page.getByTestId('echo-result')), `따라 하기 채점 (${(await page.getByTestId('echo-result').textContent().catch(() => '')).slice(0, 40)})`);
+    ok(/운지/.test(await page.getByTestId('echo-result').textContent().catch(() => '')), '정답 운지 표시');
+    ok(/맞음|정답/.test(await page.getByTestId('echo-phase').textContent()), `결과 문구 (${await page.getByTestId('echo-phase').textContent()})`);
+    await page.screenshot({ path: 'scripts/shot-echo.png', fullPage: true });
+    const nEcho = await page.evaluate(async () => {
+      const req = indexedDB.open('violin-practice');
+      const dbx = await new Promise((res) => { req.onsuccess = () => res(req.result); });
+      const n = await new Promise((res) => { const g = dbx.transaction('echoRuns').objectStore('echoRuns').count(); g.onsuccess = () => res(g.result); });
+      dbx.close();
+      return n;
+    });
+    ok(nEcho === 1, `따라 하기 기록 저장 (${nEcho})`);
+    await page.reload();
+    await tab(page, '음정');
+    await page.getByTestId('mode-echo').click();
+    ok((await page.getByTestId('echo-key').inputValue()) === 'D' && (await page.getByTestId('echo-level-five').evaluate((el) => el.classList.contains('on'))), '조·난이도 기억');
+    await tab(page, '기록');
+    await page.locator('.log .segmented').getByRole('button', { name: '연습 기록' }).click();
+    ok(/따라 하기 1문제/.test(await page.getByTestId('day-echo').textContent().catch(() => '')), '연습 기록 달력에 따라 하기');
+    ok(/D장조 · 다섯 음/.test(await page.getByTestId('day-echo').textContent().catch(() => '')), '따라 하기 조·난이도');
+    await page.getByTestId('log-insights').click();
+    ok(await seen(page.getByTestId('trend-echoPct')), '분석: 따라 하기 주별 추이');
     ok(errors.length === 0, `콘솔 오류 없음 ${errors.join(' | ')}`);
     await browser.close();
   }
@@ -329,6 +364,17 @@ try {
     ok(await seen(page.getByTestId('log-run-show')), '기록 화면에서 악보 분석 보기 버튼');
     ok(await seen(page.getByTestId('day-runs').locator('audio')), '연습 기록에서 녹음 재생');
     await page.screenshot({ path: 'scripts/shot-runs.png', fullPage: true });
+    // 분석 → 주별 추이 (악보 채점)
+    await page.getByTestId('log-insights').click();
+    ok(await seen(page.getByTestId('trends')), '분석: 주별 추이');
+    ok(/\d+%/.test(await page.getByTestId('trend-scorePct').textContent().catch(() => '')), `주별 악보 맞은 음 (${await page.getByTestId('trend-scorePct').textContent().catch(() => '')})`);
+    ok(await seen(page.getByTestId('trend-scoreCents')), '주별 악보 음정 오차');
+    ok((await page.getByTestId('trends').locator('svg.trend-bars').count()) >= 3, '주별 막대 그래프');
+    await page.screenshot({ path: 'scripts/shot-insights.png', fullPage: true });
+    await page.getByTestId('trends-table').click();
+    ok((await page.getByTestId('trends').locator('tbody tr').count()) === 8, '추이 표 8주');
+    ok(/\d+번/.test(await page.getByTestId('trends').locator('tbody tr').last().textContent()), '이번 주 채점 횟수');
+    ok(!(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1)), '추이 표: 가로 넘침 없음');
     await page.locator('.log .segmented').first().getByRole('button', { name: '녹음' }).click();
     await page.getByTestId('rec-filter').getByRole('button', { name: '악보 연습' }).click();
     await page.locator('.rec-list .rec-title').first().click();
@@ -582,6 +628,216 @@ try {
     const chips2 = await page.getByTestId('folder-chips').textContent();
     ok(/연습용 1/.test(chips2) && /기타 곡 0/.test(chips2), `악보를 다른 폴더로 옮기기 (${chips2})`);
     await page.screenshot({ path: 'scripts/shot-folders.png', fullPage: true });
+    ok(errors.length === 0, `콘솔 오류 없음 ${errors.join(' | ')}`);
+    await browser.close();
+  }
+
+  // ── 2f. 도돌이표대로 듣기 · 조 옮긴 악보 새로 저장 · 열 때 전체 화면 ──
+  {
+    const { browser, page, errors } = await launch('a445.wav');
+    await tab(page, '악보');
+    await page.getByTestId('score-file').setInputFiles(path.resolve('scripts/repeat-score.musicxml'));
+    await page.waitForTimeout(1500);
+    ok(await seen(page.getByTestId('unfold')), '도돌이표 있는 악보에 "도돌이표대로" 칸');
+    ok(await page.getByTestId('unfold').isChecked(), '도돌이표대로 기본으로 켜짐');
+    const listen = async () => {
+      await page.getByTestId('play-bpm').fill('200');
+      await page.getByTestId('play-bpm').blur();
+      await page.getByTestId('play-toggle').click();
+      const seq = [];
+      for (let i = 0; i < 90; i++) {
+        await page.waitForTimeout(50);
+        const t = await page.locator('.sheet-bar > span').first().textContent();
+        const m = t.match(/지금 (\d+)마디/);
+        if (m && seq[seq.length - 1] !== Number(m[1])) seq.push(Number(m[1]));
+        if (seq.length && !m && i > 20) break;
+      }
+      await page.waitForTimeout(300);
+      return seq;
+    };
+    const s1 = await listen();
+    ok(s1.join(',') === '1,2,1,2,3', `도돌이표대로 듣기: 마디 순서 ${s1.join(',')} (기대 1,2,1,2,3)`);
+    ok(await page.locator('.now-note').count() === 0, '다 듣고 나면 강조 지움');
+    await page.getByTestId('unfold').uncheck();
+    const s2 = await listen();
+    ok(s2.join(',') === '1,2,3', `끄면 악보 순서대로: ${s2.join(',')}`);
+    ok(await page.evaluate(() => localStorage.getItem('violin-unfold') === '0'), '도돌이표대로 설정 기억 (violin-unfold)');
+    // 조 옮겨 새 악보로 저장 → 그 악보가 열림, 원래 악보는 그대로
+    await page.getByTestId('transpose-toggle').click();
+    await page.getByTestId('transpose-up').click(); await page.getByTestId('transpose-up').click();
+    await page.waitForTimeout(800);
+    await page.getByTestId('transpose-save').click();
+    await page.waitForTimeout(1500);
+    const t2 = await page.locator('.score-title').textContent();
+    ok(t2 === '스모크 도돌이표 (E장조)', `조 옮긴 새 악보가 열림 (${t2})`);
+    ok(await seen(page.getByTestId('open-notice')), '새로 저장했다는 안내');
+    ok(!/[+-]\d/.test(await page.getByTestId('transpose-toggle').textContent()), '새 악보는 조 옮김 없이 (이미 옮긴 악보)');
+    ok((await page.locator('[data-testid=osmd] svg').count()) >= 1, '새 악보 그리기');
+    await page.goBack(); // 휴대폰 뒤로 가기 → 목록 (새 악보로 바꿔 열어도 한 번에)
+    await page.waitForTimeout(800);
+    ok(await seen(page.getByTestId('score-open')), '뒤로 가기로 목록');
+    const titles = await page.locator('[data-testid=score-open] b').allTextContents();
+    ok(titles.includes('스모크 도돌이표 (E장조)') && titles.includes('스모크 도돌이표'), `목록에 원래 악보와 새 악보 둘 다 (${titles.join(' / ')})`);
+    // 열 때 전체 화면으로: 설정 켜고 다시 연 뒤 첫 터치에
+    await tab(page, '오늘');
+    await page.getByRole('button', { name: '설정' }).click();
+    await page.getByTestId('fullscreen-setting').check();
+    await page.waitForTimeout(500);
+    ok(await page.evaluate(() => localStorage.getItem('violin-fullscreen') === '1'), '열 때 전체 화면 설정 저장 (violin-fullscreen)');
+    await page.evaluate(() => document.exitFullscreen().catch(() => {}));
+    await page.reload();
+    await page.waitForTimeout(1000);
+    ok(await page.evaluate(() => !document.fullscreenElement), '다시 열면 아직 아님 (터치 전)');
+    await tab(page, '튜너');
+    await page.waitForTimeout(600);
+    ok(await page.evaluate(() => !!document.fullscreenElement), '첫 터치에 전체 화면');
+    await page.evaluate(() => document.exitFullscreen().catch(() => {}));
+    await page.waitForTimeout(400);
+    await tab(page, '오늘');
+    await page.waitForTimeout(400);
+    ok(await page.evaluate(() => !document.fullscreenElement), '직접 나가면 돌아올 때까지 다시 안 들어감');
+    const m = await (await fetch(URL + 'manifest.webmanifest')).json();
+    ok(m.display === 'standalone', `설치한 앱은 standalone 그대로 (${m.display})`);
+    ok(errors.length === 0, `콘솔 오류 없음 ${errors.join(' | ')}`);
+    await browser.close();
+  }
+
+  // ── 2g. 복습함: 틀린 마디 → 오늘 화면 카드 → 그 마디 열기 → 악보 지우면 같이 지움 (a445: A4 +20센트만 계속) ──
+  {
+    const { browser, page, errors } = await launch('a445.wav');
+    const idb = (fn) => page.evaluate(fn);
+    await tab(page, '악보');
+    await page.getByTestId('score-file').setInputFiles(path.resolve('scripts/test-score.musicxml'));
+    await page.waitForTimeout(1500);
+    await page.getByTestId('to').fill('2');
+    await page.waitForTimeout(500);
+    await page.getByTestId('score-start').click();
+    await page.waitForTimeout(4000);
+    await page.getByTestId('score-stop').click();
+    ok(await seen(page.getByTestId('review-msg')), `채점하면 틀린 마디를 복습함에 (${await page.getByTestId('review-msg').textContent().catch(() => '')})`);
+    const rows = await idb(async () => {
+      const req = indexedDB.open('violin-practice');
+      const dbx = await new Promise((res) => { req.onsuccess = () => res(req.result); });
+      const all = await new Promise((res) => { const g = dbx.transaction('reviews').objectStore('reviews').getAll(); g.onsuccess = () => res(g.result); });
+      dbx.close();
+      return all;
+    });
+    ok(rows.length >= 1 && rows.every((r) => r.id === `${r.scoreId}:${r.measure}` && r.box === 0), `복습함 DB (reviews, "악보id:마디") ${rows.map((r) => r.id).join(' ')}`);
+    ok(!(await page.getByTestId('review-here').isVisible().catch(() => false)), '오늘 넣은 마디는 내일 복습 (악보에 아직 칩 없음)');
+    await tab(page, '오늘');
+    await page.waitForTimeout(600);
+    ok(/오늘 0마디/.test(await page.getByTestId('review-card').textContent().catch(() => '')), '오늘 화면: 오늘 0마디 · 다음 복습 날 안내');
+    // 날짜를 당겨 오늘 복습할 것으로
+    await idb(async () => {
+      const req = indexedDB.open('violin-practice');
+      const dbx = await new Promise((res) => { req.onsuccess = () => res(req.result); });
+      const tx = dbx.transaction('reviews', 'readwrite'); const st = tx.objectStore('reviews');
+      const all = await new Promise((res) => { const g = st.getAll(); g.onsuccess = () => res(g.result); });
+      for (const r of all) st.put({ ...r, due: '2000-01-01' });
+      await new Promise((res) => { tx.oncomplete = res; });
+      dbx.close();
+    });
+    await page.reload();
+    await page.waitForTimeout(1000);
+    ok(await seen(page.getByTestId('review-open')), '오늘 화면에 틀린 마디 복습 (곡·마디)');
+    const first = rows.map((r) => r.measure).sort((a, b) => a - b)[0];
+    await page.getByTestId('review-open').first().click();
+    ok(await seen(page.getByTestId('score-view')), '복습 마디 누르면 그 악보가 열림');
+    await page.waitForTimeout(1200);
+    ok(Number(await page.getByTestId('from').inputValue()) === first, `그 마디부터 (${await page.getByTestId('from').inputValue()}~${await page.getByTestId('to').inputValue()})`);
+    ok(await seen(page.getByTestId('review-here')), '악보에 "오늘 복습할 마디" 칩');
+    // 조 옮겨도 마디 번호 기준이라 칩 그대로
+    await page.getByTestId('transpose-toggle').click();
+    await page.getByTestId('transpose-up').click();
+    await page.waitForTimeout(1000);
+    ok(await seen(page.getByTestId('review-chip')), '조 옮겨도 복습 마디 칩 그대로');
+    await page.getByTestId('transpose-reset').click();
+    await page.waitForTimeout(500);
+    await page.screenshot({ path: 'scripts/shot-review.png', fullPage: true });
+    // 악보 지우면 복습도 지움
+    await page.goBack();
+    await page.waitForTimeout(800);
+    page.once('dialog', (d) => d.accept());
+    await page.getByRole('button', { name: '악보 삭제' }).first().click();
+    await page.waitForTimeout(800);
+    const left = await idb(async () => {
+      const req = indexedDB.open('violin-practice');
+      const dbx = await new Promise((res) => { req.onsuccess = () => res(req.result); });
+      const n = await new Promise((res) => { const g = dbx.transaction('reviews').objectStore('reviews').count(); g.onsuccess = () => res(g.result); });
+      dbx.close();
+      return n;
+    });
+    ok(left === 0, `악보를 지우면 그 복습 마디도 지움 (남은 ${left})`);
+    await tab(page, '오늘');
+    await page.waitForTimeout(600);
+    ok(!(await page.getByTestId('review-card').isVisible().catch(() => false)), '복습할 것이 없으면 카드 숨김');
+    ok(errors.length === 0, `콘솔 오류 없음 ${errors.join(' | ')}`);
+    await browser.close();
+  }
+
+  // ── 2g. 장·단음계 악보 24조 + 조 바꾸기 ──
+  {
+    const { browser, page, errors } = await launch('phrases.wav');
+    await tab(page, '악보');
+    await page.getByTestId('open-exercises').click();
+    ok(await seen(page.getByTestId('sheet-card')), '연습곡 화면에 장·단음계 악보 카드');
+    ok((await page.getByTestId('sheet-card').locator('.sheet-keys .chip').count()) === 12, '장조 12개 칩');
+    await page.getByTestId('sheet-Eb').click();
+    await page.getByTestId('sheet-nav').waitFor({ timeout: 5000 });
+    await page.waitForTimeout(1200);
+    const title = async () => (await page.locator('.score-title').textContent()) ?? '';
+    ok(/E♭장조 음계 · 2옥타브/.test(await title()), `음계 악보 E♭장조 (${await title()})`);
+    ok(!/포지션/.test(await page.locator('[data-testid=osmd] svg').first().textContent()), '음계 악보에는 포지션 글씨 없음');
+    await page.getByTestId('acc-toggle').click();
+    await page.getByTestId('len-chips').getByRole('button', { name: '16마디' }).click();
+    await page.waitForTimeout(800);
+    const accs = (await page.getByTestId('acc-chip').allTextContents()).join(' ');
+    ok(accs === 'B♭ E♭ A♭', `E♭장조 형광펜 칩 (${accs})`);
+    await page.getByTestId('acc-toggle').click();
+    await page.screenshot({ path: 'scripts/shot-sheet.png', fullPage: true });
+    const waitTitle = (re) => page.waitForFunction((src) => new RegExp(src).test(document.querySelector('.score-title')?.textContent ?? ''), re.source, { timeout: 5000 }).catch(() => {});
+    await page.getByTestId('sheet-next').click();
+    await waitTitle(/A♭장조/);
+    ok(/A♭장조/.test(await title()), '다음 조 → A♭장조');
+    await page.getByTestId('sheet-prev').click();
+    await waitTitle(/E♭장조/);
+    await page.getByTestId('sheet-prev').click();
+    await waitTitle(/B♭장조/);
+    ok(/B♭장조/.test(await title()), `이전 조 두 번 → B♭장조 (${await title()})`);
+    await page.getByTestId('sheet-nav-oct-3').click();
+    await waitTitle(/3옥타브/);
+    ok(/B♭장조 음계 · 3옥타브/.test(await title()), '3옥타브로 바꾸기');
+    await page.getByTestId('sheet-prev').click();
+    await waitTitle(/F장조/);
+    ok(/F장조 음계 · 2옥타브/.test(await title()) && await page.getByTestId('sheet-nav-oct-3').isDisabled(), `F장조는 E7을 넘어 2옥타브 (${await title()})`);
+    await page.getByTestId('sheet-prev').click();
+    await waitTitle(/C장조/);
+    ok(/C장조 음계 · 3옥타브/.test(await title()), '다음 조에서는 다시 3옥타브');
+    await page.getByTestId('sheet-relative').click();
+    await waitTitle(/A단조/);
+    ok(/A단조 \(화성\) 음계/.test(await title()), `나란한단조 → A단조 (${await title()})`);
+    await page.getByTestId('sheet-nav-form-melodic').click();
+    await waitTitle(/가락/);
+    ok(/A단조 \(가락\) 음계 · 3옥타브/.test(await title()), `단조 형태 바꾸기 (${await title()})`);
+    await page.getByTestId('sheet-key').selectOption('G#m');
+    await waitTitle(/G♯단조/);
+    ok(/G♯단조 \(가락\)/.test(await title()), '조 고르기 → G♯단조');
+    await page.screenshot({ path: 'scripts/shot-sheet-nav.png', fullPage: false });
+    await page.getByRole('button', { name: '◀ 목록' }).click();
+    ok(await seen(page.getByTestId('sheet-card')), '목록으로 돌아오면 연습곡 화면');
+    ok(await page.getByTestId('sheet-minor').evaluate((el) => el.classList.contains('on')), '마지막 설정(단조) 기억');
+    ok(await seen(page.getByTestId('sheet-G#m')), '단조 12개 칩');
+    ok(/F단조·F♯단조는 3옥타브가/.test(await page.getByTestId('sheet-card').textContent()), '3옥타브 안 되는 조 안내');
+    await page.getByRole('button', { name: '◀ 목록' }).click();
+    ok(/내 악보 0개/.test(await page.locator('.page').textContent()), '음계 악보는 내 악보 목록과 따로');
+    const nEx = await page.evaluate(async () => {
+      const req = indexedDB.open('violin-practice');
+      const dbx = await new Promise((res) => { req.onsuccess = () => res(req.result); });
+      const rows = await new Promise((res) => { const g = dbx.transaction('scores').objectStore('scores').getAll(); g.onsuccess = () => res(g.result); });
+      dbx.close();
+      return rows.filter((r) => r.exercise?.stepId === 'scales').length;
+    });
+    ok(nEx === 1, `음계 악보는 한 장만 덮어씀 (${nEx})`);
     ok(errors.length === 0, `콘솔 오류 없음 ${errors.join(' | ')}`);
     await browser.close();
   }

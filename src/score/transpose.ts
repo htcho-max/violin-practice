@@ -3,6 +3,7 @@
  * 음 이름은 조표 기준으로 다시 적는다 (원래 조에서 F#5 → 2반음 위 G#5, 조표 D→E).
  * 임시표(<accidental>)는 마디 안에서 새로 계산해 붙인다 (옛 임시표는 지움).
  */
+import type { ScoreFile } from '../data/db';
 const STEPS = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
 const STEP_PC: Record<string, number> = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
 
@@ -124,3 +125,26 @@ export function transposeXml(xml: string, semis: number): string {
 export function belowViolin(midis: number[]): number { return midis.filter((m) => m < 55).length; }
 
 export const semisLabel = (s: number) => (s === 0 ? '원래 조' : `${s > 0 ? '높게' : '낮게'} ${Math.abs(s)}반음`);
+
+/** 조 옮겨 저장할 악보 제목: "제목 (E장조)", 옥타브만 옮기면 "제목 (D장조 한 옥타브 위)" */
+export function transposedTitle(title: string, key: { fifths: number; mode: string | null }, semis: number): string {
+  const name = keyName(newFifths(key.fifths, semis), key.mode);
+  const oct = semis % 12 === 0 ? ` ${Math.abs(semis / 12) === 1 ? '한' : Math.abs(semis / 12)} 옥타브 ${semis > 0 ? '위' : '아래'}` : '';
+  return `${title} (${name}${oct})`;
+}
+/** 조 옮긴 악보를 새 악보로: 같은 곡·폴더·파트, 내 표시는 복사, 조 옮김·고치기 전 악보·기록은 없이 */
+export function transposedCopy(score: ScoreFile, o: { xml: string; accXml?: string; title: string; from?: number; to?: number }): ScoreFile {
+  return {
+    title: o.title,
+    xml: o.xml,
+    createdAt: Date.now(),
+    ...(score.pieceId ? { pieceId: score.pieceId } : {}),
+    ...(score.folder ? { folder: score.folder } : {}),
+    ...(score.part !== undefined ? { part: score.part } : {}),
+    ...(score.showOthers ? { showOthers: true } : {}),
+    ...(o.accXml ? { accXml: o.accXml, ...(score.accName ? { accName: score.accName } : {}) } : {}),
+    ...(score.marks && Object.keys(score.marks).length ? { marks: JSON.parse(JSON.stringify(score.marks)) } : {}),
+    ...(o.from !== undefined ? { lastFrom: o.from } : {}),
+    ...(o.to !== undefined ? { lastTo: o.to } : {}),
+  };
+}

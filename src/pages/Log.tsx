@@ -13,6 +13,10 @@ import { LessonNotesLog } from '../components/LessonNotes';
 import { RunInsightView } from './Score';
 import { requestScore } from '../state/openRequest';
 import type { TabId } from '../components/TabBar';
+import { Insights } from './Insights';
+import { useEchoRuns } from '../state/useEchoRuns';
+import { keyById } from '../exercise/theory';
+import { ECHO_LEVELS } from '../exercise/echo';
 
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
 
@@ -24,7 +28,7 @@ function level(sec: number): number {
   return 4;
 }
 
-type View = 'calendar' | 'pieces' | 'recordings';
+type View = 'calendar' | 'insights' | 'pieces' | 'recordings';
 
 export function Log({ goTab }: { goTab?: (t: TabId) => void } = {}) {
   const [view, setView] = useState<View>(() => { try { return (localStorage.getItem('violin-log-view') as View) || 'calendar'; } catch { return 'calendar'; } });
@@ -34,10 +38,12 @@ export function Log({ goTab }: { goTab?: (t: TabId) => void } = {}) {
     <section className="page log">
       <div className="segmented">
         <button className={view === 'calendar' ? 'on' : ''} onClick={() => go('calendar')}>연습 기록</button>
+        <button className={view === 'insights' ? 'on' : ''} onClick={() => go('insights')} data-testid="log-insights">분석</button>
         <button className={view === 'pieces' ? 'on' : ''} onClick={() => go('pieces')}>곡</button>
         <button className={view === 'recordings' ? 'on' : ''} onClick={() => go('recordings')}>녹음</button>
       </div>
       {view === 'calendar' && <><Calendar goTab={goTab} /><LessonNotesLog /></>}
+      {view === 'insights' && <Insights />}
       {view === 'pieces' && <Pieces />}
       {view === 'recordings' && <Recordings />}
     </section>
@@ -47,6 +53,7 @@ export function Log({ goTab }: { goTab?: (t: TabId) => void } = {}) {
 function Calendar({ goTab }: { goTab?: (t: TabId) => void }) {
   const sessions = useSessions();
   const runs = useScoreRuns();
+  const echoRuns = useEchoRuns();
   const [openRun, setOpenRun] = useState<number | null>(null);
   const pieces = usePieces();
   const pieceName = (id: string) => pieces.find((p) => p.id === id)?.title;
@@ -85,6 +92,14 @@ function Calendar({ goTab }: { goTab?: (t: TabId) => void }) {
   };
   const daySessions = sessions.filter((s) => s.date === selected);
   const dayRuns = runs.filter((r) => r.date === selected);
+  const dayEcho = echoRuns.filter((r) => r.date === selected);
+  // 따라 하기: 조·난이도별로 묶어서 한 줄씩
+  const echoGroups = [...dayEcho.reduce((m, r) => {
+    const k = `${r.key}:${r.level}`;
+    const g = m.get(k) ?? { key: r.key, level: r.level, tries: 0, perfect: 0, hits: 0, expected: 0 };
+    g.tries++; if (r.hits === r.expected) g.perfect++; g.hits += r.hits; g.expected += r.expected;
+    return m.set(k, g);
+  }, new Map<string, { key: string; level: string; tries: number; perfect: number; hits: number; expected: number }>()).values()];
 
   return (
     <div className="page-sub">
@@ -113,7 +128,7 @@ function Calendar({ goTab }: { goTab?: (t: TabId) => void }) {
 
       <div className="card">
         <b>{Number(selected.slice(5, 7))}월 {Number(selected.slice(8))}일</b>
-        {daySessions.length === 0 && dayRuns.length === 0 && <p className="muted">기록이 없어요.</p>}
+        {daySessions.length === 0 && dayRuns.length === 0 && dayEcho.length === 0 && <p className="muted">기록이 없어요.</p>}
         {daySessions.map((s) => (
           <div key={s.id} className="session-row">
             <div className="session-row-head">
@@ -147,6 +162,14 @@ function Calendar({ goTab }: { goTab?: (t: TabId) => void }) {
                 </li>
               ))}
             </ul>
+          </div>
+        )}
+        {dayEcho.length > 0 && (
+          <div className="session-row" data-testid="day-echo">
+            <div className="session-row-head"><span><b>따라 하기 {dayEcho.length}문제</b> <span className="muted">{dayEcho.filter((r) => r.hits === r.expected).length}문제 다 맞힘</span></span></div>
+            <ul>{echoGroups.map((g) => (
+              <li key={`${g.key}:${g.level}`}>{keyById(g.key)?.name ?? g.key} · {ECHO_LEVELS.find((l) => l.id === g.level)?.label ?? g.level} <span className="muted">{g.perfect}/{g.tries} 정답 · 맞힌 음 {Math.round((g.hits / Math.max(1, g.expected)) * 100)}%</span></li>
+            ))}</ul>
           </div>
         )}
       </div>

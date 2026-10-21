@@ -17,6 +17,26 @@ export function arpeggio(key: Key, lo: number, hi: number): Phrase[] {
   const up = range(lo, hi).filter((d) => isTriad(key, d));
   return [up.map((d) => sp(key, d, 1, 'harmonic')), up.slice(0, -1).reverse().map((d) => sp(key, d, -1, 'harmonic'))];
 }
+/** 음계 악보 (교재 모양): 음계 오르내림 + 으뜸화음 분산화음 오르내림. 단조는 고른 형태로 */
+export function scaleSheet(key: Key, lo: number, hi: number, form: MinorForm = 'natural'): Phrase[] {
+  const up = range(lo, hi).map((d) => sp(key, d, 1, form));
+  const down = range(hi - 1, lo).map((d) => sp(key, d, -1, form));
+  const arp = range(lo, hi).filter((d) => isTriad(key, d));
+  return [up, down, arp.map((d) => sp(key, d, 1, 'harmonic')), arp.slice(0, -1).reverse().map((d) => sp(key, d, -1, 'harmonic'))];
+}
+/** 음계 악보 음역: 바이올린 G3(55) ~ E7(100) */
+export const SHEET_LO = 55, SHEET_HI = 100;
+/** 가장 낮은 G3 위에서 시작하는 으뜸음부터 n옥타브 (으뜸음 → 으뜸음). E7 을 넘으면 null */
+export function sheetRange(key: Key, octaves: number): [number, number] | null {
+  let lo = -1;
+  for (let d = 24; d < 40; d++) if ((((d - key.startD) % 7) + 7) % 7 === 0 && midiOf(scalePitch(key, d, 1)) >= SHEET_LO) { lo = d; break; }
+  if (lo < 0) return null;
+  const hi = lo + 7 * octaves;
+  return midiOf(scalePitch(key, hi, 1)) <= SHEET_HI ? [lo, hi] : null;
+}
+/** 이 조로 만들 수 있는 가장 많은 옥타브 (1~3) */
+export const maxSheetOctaves = (key: Key) => [3, 2, 1].find((n) => sheetRange(key, n)) ?? 1;
+
 /** 3도: 1-3, 2-4, … */
 export function thirds(key: Key, lo: number, hi: number): Phrase[] {
   const up: PNote[] = [], down: PNote[] = [];

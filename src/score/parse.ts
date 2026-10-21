@@ -54,7 +54,11 @@ export interface ParsedScore {
   tempo?: number;
   /** 마디가 시작하는 위치 (4분음표 단위) */
   measureStart: Map<number, number>;
+  /** 도돌이표·N번 괄호 (하나라도 있으면 모든 마디, measures 와 같은 순서. 없으면 빈 배열) */
+  bars: Bar[];
 }
+/** 마디의 도돌이표 정보. ending = 몇 번째에 연주하는 괄호인지 (1번 괄호 [1], 2번 괄호 [2]) */
+export interface Bar { num: number; forward?: boolean; backward?: boolean; times?: number; ending?: number[] }
 export interface ParseOptions {
   /** 몇 번째 파트 (0부터) */
   part?: number;
@@ -127,6 +131,8 @@ function parseDoc(doc: Document, opt: ParseOptions): ParsedScore {
   const dyn: DynEvent[] = [];
   const measureStart = new Map<number, number>();
   let mStart = 0;
+  const bars: Bar[] = [];
+  let ending: number[] | null = null;
   const artOf = (el: Element, voice: string, chordTone: boolean): Articulation | undefined => {
     const has = (tag: string) => el.getElementsByTagName(tag).length > 0;
     const a: Articulation = {};
@@ -164,6 +170,22 @@ function parseDoc(doc: Document, opt: ParseOptions): ParsedScore {
     const num = Number.isFinite(n0) && !measures.includes(n0) ? n0 : measures.length ? measures[measures.length - 1] + 1 : 1;
     measures.push(num);
     measureStart.set(num, mStart);
+    // 도돌이표·N번 괄호
+    const bar: Bar = { num };
+    bars.push(bar);
+    for (const bl of Array.from(m.children).filter((c) => c.nodeName === 'barline')) {
+      const rep = bl.getElementsByTagName('repeat')[0];
+      if (rep?.getAttribute('direction') === 'forward') bar.forward = true;
+      if (rep?.getAttribute('direction') === 'backward') { bar.backward = true; const t = Number(rep.getAttribute('times')); if (t > 1) bar.times = t; }
+      const en = bl.getElementsByTagName('ending')[0];
+      if (en) {
+        const type = en.getAttribute('type');
+        if (type === 'start') ending = (en.getAttribute('number') ?? '1').split(/[,\s]+/).map(Number).filter((x) => x > 0);
+        if (ending) bar.ending = ending;
+        if (type === 'stop' || type === 'discontinue') ending = null;
+      } else if (ending) bar.ending = ending;
+    }
+    if (ending && !bar.ending) bar.ending = ending;
     let pos = 0; // 4분음표 단위
     let lastStart = 0;
     let maxPos = 0;
@@ -266,7 +288,9 @@ function parseDoc(doc: Document, opt: ParseOptions): ParsedScore {
   setVelocities(notes, dyn, measureStart);
   const snd = Array.from(doc.getElementsByTagName('sound')).find((e) => e.getAttribute('tempo'));
   const tq = snd ? Number(snd.getAttribute('tempo')) : NaN;
-  const res: ParsedScore = { title, measures, notes, measureLen, time, parts, dyn, measureStart, ...(Number.isFinite(tq) && tq >= 20 && tq <= 300 ? { tempo: Math.round(tq) } : {}) };
+  const res: ParsedScore = { title, measures, notes, measureLen, time, parts, dyn, measureStart,
+    bars: bars.some((b) => b.forward || b.backward || b.ending) ? bars : [],
+    ...(Number.isFinite(tq) && tq >= 20 && tq <= 300 ? { tempo: Math.round(tq) } : {}) };
   return track ? ({ ...res, doc, els, ties: tieEls } as TrackedScore) : res;
 }
 
@@ -296,6 +320,39 @@ export function applyUserMarks(s: ParsedScore, marks: UserMarks | undefined): Pa
   const dyn = [...s.dyn, ...extra];
   setVelocities(notes, dyn, s.measureStart);
   return { ...s, notes, dyn };
+}
+
+/** 도돌이표가 있는지 */
+export const hasRepeats = (s: ParsedScore) => s.bars.some((b) => b.backward);
+
+/**
+ * 도돌이표대로 펼친 마디 순서 (마디 번호). 도돌이표가 없으면 measures 그대로.
+ * 1·2번 괄호, 여러 번 반복(times), 도돌이 시작 표가 없으면 처음부터.
+ */
+export function playOrder(s: ParsedScore): number[] {
+  if (!s.bars.length) return [...s.measures];
+  const bars = s.bars;
+  const out: number[] = [];
+  let i = 0, startIdx = 0, pass = 1, guard = 0;
+  const jumps = new Map<number, number>();
+  while (i < bars.length && guard++ < 10000) {
+    const b = bars[i];
+    if (b.forward && startIdx !== i) { startIdx = i; pass = 1; }
+    if (b.ending && !b.ending.includes(pass)) { i++; continue; }
+    out.push(b.num);
+    if (b.backward) {
+      const done = jumps.get(i) ?? 0;
+      // 괄호 안의 도돌이표는 그 괄호를 칠 때마다, 아니면 times 번
+      const again = b.ending ? done < 8 : done < (b.times ?? 2) - 1;
+      if (again) { jumps.set(i, done + 1); pass++; i = startIdx; continue; }
+      startIdx = i + 1; pass = 1;
+    } else if (b.ending && !bars[i + 1]?.ending) {
+      // 마지막 괄호를 지나면 반복 끝
+      startIdx = i + 1; pass = 1;
+    }
+    i++;
+  }
+  return out;
 }
 
 export function notesInRange(s: ParsedScore, from: number, to: number): ScoreNote[] {

@@ -14,7 +14,11 @@ export interface AccPart { score: ParsedScore; inst: 'violin' | 'piano' }
 export type Plan = { events: PlayEvent[]; clicks: { time: number; accent: boolean }[]; total: number; acc: PlayEvent[] };
 /** 파트 이름으로 소리 고르기 */
 export const instFor = (name: string): 'violin' | 'piano' => (/piano|klavier|피아노|pf\.?$|keyboard|organ|harp|cembalo|harpsichord/i.test(name) ? 'piano' : 'violin');
-export interface PlanOptions { bpm: number; from: number; to: number; countIn: boolean }
+export interface PlanOptions {
+  bpm: number; from: number; to: number; countIn: boolean;
+  /** 마디 순서 (도돌이표 펼치기, playOrder). 없으면 악보 순서대로 한 번씩. 구간(from~to) 밖 마디는 건너뜀 */
+  order?: number[];
+}
 
 /** 구간의 음을 시간(초)으로. bpm 은 4분음표 기준 */
 export function planPlayback(s: ParsedScore, o: PlanOptions, accParts: AccPart[] = []): Plan {
@@ -22,16 +26,21 @@ export function planPlayback(s: ParsedScore, o: PlanOptions, accParts: AccPart[]
   const [beats, unit] = s.time;
   const beatQ = 4 / unit; // 한 박 = 4분음표 몇 개
   const countQ = o.countIn ? beats * beatQ : 0;
-  const start = new Map<number, number>();
+  // 마디 순서대로 시작 위치 (도돌이표를 펼치면 같은 마디가 여러 번)
+  const segs: { m: number; Q0: number }[] = [];
   let acc = countQ;
-  for (const m of s.measures) {
+  for (const m of o.order ?? s.measures) {
     if (m < o.from || m > o.to) continue;
-    start.set(m, acc);
+    segs.push({ m, Q0: acc });
     acc += s.measureLen.get(m) ?? beats * beatQ;
   }
-  const events = s.notes
-    .filter((n) => start.has(n.measure))
-    .map((n) => ({ note: n, time: (start.get(n.measure)! + n.beat) * q, dur: n.dur * q }));
+  const byMeasure = (ns: ScoreNote[]) => {
+    const out = new Map<number, ScoreNote[]>();
+    for (const n of ns) { const a = out.get(n.measure); if (a) a.push(n); else out.set(n.measure, [n]); }
+    return out;
+  };
+  const mine = byMeasure(s.notes);
+  const events: PlayEvent[] = segs.flatMap((g) => (mine.get(g.m) ?? []).map((n) => ({ note: n, time: (g.Q0 + n.beat) * q, dur: n.dur * q })));
   const clicks: { time: number; accent: boolean }[] = [];
   for (let k = 0; k * beatQ < acc - 1e-9; k++) {
     const tq = k * beatQ;
@@ -39,7 +48,8 @@ export function planPlayback(s: ParsedScore, o: PlanOptions, accParts: AccPart[]
   }
   const accEv: PlayEvent[] = [];
   for (const ap of accParts) {
-    for (const n of ap.score.notes) if (start.has(n.measure)) accEv.push({ note: n, time: (start.get(n.measure)! + n.beat) * q, dur: n.dur * q, inst: ap.inst });
+    const theirs = byMeasure(ap.score.notes);
+    for (const g of segs) for (const n of theirs.get(g.m) ?? []) accEv.push({ note: n, time: (g.Q0 + n.beat) * q, dur: n.dur * q, inst: ap.inst });
   }
   accEv.sort((a, b) => a.time - b.time);
   return applyFermatas({ events, clicks, total: acc * q, acc: accEv });

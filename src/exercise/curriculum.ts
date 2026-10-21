@@ -1,10 +1,10 @@
-import { keyById, type Key } from './theory';
+import { keyById, type Key, type MinorForm } from './theory';
 import type { FingerOptions } from './fingering';
-import { scale, arpeggio, thirds, seq4, stringScale, shiftDrill, etude, autoRange, type Phrase } from './patterns';
+import { scale, arpeggio, thirds, seq4, stringScale, shiftDrill, etude, autoRange, scaleSheet, sheetRange, maxSheetOctaves, type Phrase } from './patterns';
 import { bowBase, variantById, BOW_BASES, type BowBaseId } from './bow';
 import { build, type Bowing, type FingerShow, type Built } from './build';
 
-export type PatternId = 'bow' | 'scale' | 'arpeggio' | 'thirds' | 'seq4' | 'stringScale' | 'shiftDrill' | 'etude';
+export type PatternId = 'bow' | 'scaleSheet' | 'scale' | 'arpeggio' | 'thirds' | 'seq4' | 'stringScale' | 'shiftDrill' | 'etude';
 export type PositionSet = '1' | '3' | '1-3';
 export const PATTERNS: { id: PatternId; label: string }[] = [
   { id: 'scale', label: '음계' },
@@ -32,7 +32,18 @@ export interface ExerciseSpec {
   bowing?: Bowing;
   base?: BowBaseId; // 활 연습 기본 악구
   variant?: string; // 활 변형 번호
+  /** 음계 악보: 단조 형태 */
+  form?: MinorForm;
 }
+export const MINOR_FORMS: { id: MinorForm; label: string }[] = [
+  { id: 'natural', label: '자연' }, { id: 'harmonic', label: '화성' }, { id: 'melodic', label: '가락' },
+];
+/** 음계 악보 진도 id (조·형태·옥타브마다) */
+export const scaleProgressId = (key: string, form: string | undefined, octaves: number) => `sheet-${key}-${form ?? 'major'}-${octaves}`;
+/** 음계 악보 옥타브: 고른 옥타브가 E7 을 넘으면 낮춤 */
+export const sheetOctaves = (key: string, want: number) => Math.max(1, Math.min(want, maxSheetOctaves(keyById(key))));
+/** 음계 악보 운지 계산용 (높은 포지션까지. 번호는 악보에 넣지 않음) */
+const SHEET_FO: FingerOptions = { positions: Array.from({ length: 14 }, (_, i) => i + 1) };
 export interface Step { id: string; stage: string; title: string; tip: string; spec: ExerciseSpec; tempo: number }
 
 export const STAGES = [
@@ -87,6 +98,18 @@ export function makeExercise(spec: ExerciseSpec, o: MakeOptions): Made {
     const b = build({ title, key: base === 'open' ? keyById('C') : key, phrases: bowBase(key, base), perBeat: 4, bowing: 'detache', bow: v.pattern, fo: { positions: [1, 3] }, fingers: o.fingers, tempo: o.tempo });
     return { ...b, title, describe: '' };
   }
+  if (spec.pattern === 'scaleSheet') {
+    // G3 위 가장 낮은 으뜸음부터. 고른 옥타브가 E7 을 넘으면 낮춤
+    const oct = sheetOctaves(spec.key, spec.octaves ?? 2);
+    const ar = sheetRange(key, oct);
+    if (!ar) return { xml: '', notes: [], shiftKeys: [], measures: 0, error: `${key.name}는 만들 수 없어요.`, title: '', describe: '' };
+    const form = key.mode === 'minor' ? spec.form ?? 'natural' : undefined;
+    const formLabel = form ? `(${MINOR_FORMS.find((f) => f.id === form)!.label}) ` : '';
+    const title = o.title ?? `${key.name} ${formLabel}음계 · ${oct}옥타브`;
+    // 손가락 번호·포지션 글씨는 넣지 않음 (악보 화면의 포지션 추천을 쓰면 돼요)
+    const b = build({ title, key, phrases: scaleSheet(key, ar[0], ar[1], form), perBeat, bowing, fo: SHEET_FO, fingers: 'none', tempo: o.tempo });
+    return { ...b, shiftKeys: [], title, describe: '' };
+  }
   let phrases: Phrase[];
   let rangeText = '';
   const posLabel = POSITION_SETS.find((p) => p.id === spec.positions)!.label;
@@ -103,7 +126,7 @@ export function makeExercise(spec: ExerciseSpec, o: MakeOptions): Made {
   } else {
     const r = autoRange(key, fo, spec.octaves ?? 2);
     if (!r) return { xml: '', notes: [], shiftKeys: [], measures: 0, error: `${key.name}는 ${posLabel}에서 낼 수 없어요.`, title: '', describe: '' };
-    const fn = { scale, arpeggio, thirds, seq4 }[spec.pattern];
+    const fn = { scale, arpeggio, thirds, seq4 }[spec.pattern as 'scale' | 'arpeggio' | 'thirds' | 'seq4'];
     phrases = fn(key, r[0], r[1]);
     const oct = Math.round((r[1] - r[0]) / 7);
     rangeText = (r[1] - r[0]) % 7 === 0 ? `${oct}옥타브` : '';

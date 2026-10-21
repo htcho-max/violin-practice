@@ -16,6 +16,39 @@ import { db } from '../data/db';
 import { topWeakSpots, pitchHabits, scaleHas, ladderKey, LADDER_PCTS } from '../score/practice';
 import { useDrills } from '../state/useDrills';
 import { requestScore } from '../state/openRequest';
+import { useReviews } from '../state/useReviews';
+import { dueGroups, measureRuns, REVIEW_DAYS } from '../data/review';
+
+/** 채점에서 틀린 마디를 간격을 늘려 가며 다시 (오늘 복습할 것). 누르면 그 악보 그 마디로 */
+function ReviewCard({ go, scoreIds }: { go: (t: TabId) => void; scoreIds: Set<number> | null }) {
+  const all = useReviews();
+  const today = useToday();
+  // 지워진 악보의 마디는 빼요
+  const items = scoreIds ? all.filter((i) => scoreIds.has(i.scoreId)) : [];
+  if (!items.length) return null;
+  const groups = dueGroups(items, today);
+  const dueN = groups.reduce((a, g) => a + g.measures.length, 0);
+  const later = items.filter((i) => i.due > today).sort((a, b) => a.due.localeCompare(b.due));
+  const open = (scoreId: number, a: number, b: number) => { requestScore({ scoreId, measure: a, to: b }); go('score'); };
+  return (
+    <div className="card" data-testid="review-card">
+      <div className="card-head"><b>틀린 마디 복습</b><span className="muted small">오늘 {dueN}마디 · 기다리는 {later.length}마디</span></div>
+      {groups.length === 0 ? (
+        <p className="muted small">오늘 복습할 마디는 없어요.{later.length ? ` 다음 복습은 ${Number(later[0].due.slice(5, 7))}월 ${Number(later[0].due.slice(8))}일.` : ''}</p>
+      ) : groups.map((g) => (
+        <div key={g.scoreId} className="review-group">
+          <div className="small"><b>{g.title}</b></div>
+          <div className="chips">
+            {measureRuns(g.measures.map((m) => m.measure)).map(([a, b]) => (
+              <button key={a} className="chip" onClick={() => open(g.scoreId, a, b)} data-testid="review-open">{a === b ? `${a}마디` : `${a}~${b}마디`}</button>
+            ))}
+          </div>
+        </div>
+      ))}
+      <p className="hint">채점에서 틀린 마디가 여기 모여요. 복습하는 날 깨끗하게 켜면 {REVIEW_DAYS.join('→')}일로 간격이 늘어나고, 끝까지 가면 졸업해요.</p>
+    </div>
+  );
+}
 
 function PieceChips({ list, selected, onPick }: { list: Piece[]; selected?: string; onPick: (id: string | null) => void }) {
   if (!list.length) return null;
@@ -172,6 +205,7 @@ export function Today({ go, openSettings }: { go: (t: TabId) => void; openSettin
           <button className="primary wide big" onClick={() => start(settings.routine.filter((r) => r.minutes > 0))} disabled={!settings.routine.some((r) => r.minutes > 0)} data-testid="session-start">▶ 연습 시작</button>
         </div>
         {weakCard}
+        <ReviewCard go={go} scoreIds={scoreIds} />
         {basicsCard}
         {habitsCard}
         {piecesCard}
@@ -205,6 +239,7 @@ export function Today({ go, openSettings }: { go: (t: TabId) => void; openSettin
         {tool && <button className="secondary wide" onClick={() => go(tool.tab)}>{tool.label}</button>}
       </div>
       {(cur.key === 'scale' || cur.key === 'shift') && basicsCard}
+      {(cur.key === 'piece' || cur.key === 'review') && <ReviewCard go={go} scoreIds={scoreIds} />}
 
       <div className="card">
         <ol className="routine done-list">

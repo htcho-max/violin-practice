@@ -128,7 +128,7 @@ export function toMusicXML(o: BuildOptions, notes: BuiltNote[]): Built {
       const prev = acc.has(accKey) ? acc.get(accKey)! : keyAlter(o.key.fifths, L);
       x.push(`<pitch><step>${L}</step>${n.p.alter ? `<alter>${n.p.alter}</alter>` : ''}<octave>${oct}</octave></pitch>`);
       x.push(`<duration>${n.dur}</duration><voice>1</voice><type>${type}</type>${'<dot/>'.repeat(dots)}`);
-      if (prev !== n.p.alter) { x.push(`<accidental>${n.p.alter > 0 ? 'sharp' : n.p.alter < 0 ? 'flat' : 'natural'}</accidental>`); acc.set(accKey, n.p.alter); }
+      if (prev !== n.p.alter) { x.push(`<accidental>${n.p.alter >= 2 ? 'double-sharp' : n.p.alter > 0 ? 'sharp' : n.p.alter <= -2 ? 'flat-flat' : n.p.alter < 0 ? 'flat' : 'natural'}</accidental>`); acc.set(accKey, n.p.alter); }
     } else {
       x.push(`<rest/><duration>${n.dur}</duration><voice>1</voice><type>${type}</type>${'<dot/>'.repeat(dots)}`);
     }

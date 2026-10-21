@@ -11,9 +11,10 @@ import { usePitch } from '../state/usePitch';
 import { useAnalysis } from '../state/useAnalysis';
 import { useAudioStatus, setAudioStatus } from '../state/audioStatus';
 import { useWakeLock } from '../state/wakeLock';
+import { EchoTrainer } from './EchoTrainer';
 
 type Ref = 'equal' | 'just';
-type Mode = 'graph' | 'arrival' | 'vibrato';
+type Mode = 'graph' | 'arrival' | 'vibrato' | 'echo';
 
 const fmt = (c: number | null) => (c === null ? '—' : centsText(c));
 const tone = (c: number | null) => (c === null ? '' : Math.abs(c) <= 5 ? 'good' : Math.abs(c) <= 15 ? 'warn' : 'bad');
@@ -127,7 +128,10 @@ export function Drone() {
         <button className={mode === 'graph' ? 'on' : ''} onClick={() => setMode('graph')}>음정 그래프</button>
         <button className={mode === 'arrival' ? 'on' : ''} onClick={() => setMode('arrival')}>도착 음정</button>
         <button className={mode === 'vibrato' ? 'on' : ''} onClick={() => setMode('vibrato')}>비브라토</button>
+        <button className={mode === 'echo' ? 'on' : ''} onClick={() => setMode('echo')} data-testid="mode-echo">따라 하기</button>
       </div>
+
+      {mode === 'echo' && <EchoTrainer pitch={pitch} beforePlay={() => { if (drone.playing) stopDrone(); }} />}
 
       {mode === 'graph' && (
         <div className="card">
