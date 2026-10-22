@@ -8,13 +8,13 @@ const started: number[] = [];
 const fake = {
   currentTime: 0, state: 'running', sampleRate: 44100, baseLatency: 0,
   destination: {},
-  createGain: () => ({ gain: { value: 1, setValueAtTime() {}, linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {}, setTargetAtTime() {} }, connect(x: unknown) { return x; } }),
+  createGain: () => ({ gain: { value: 1, setValueAtTime() {}, linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {}, setTargetAtTime() {}, cancelScheduledValues() {} }, connect(x: unknown) { return x; }, disconnect() {} }),
   createBiquadFilter: () => ({ type: '', frequency: { value: 0 }, Q: { value: 0 }, connect(x: unknown) { return x; } }),
   createOscillator: () => ({ type: '', frequency: { value: 0 }, setPeriodicWave() {}, connect(x: unknown) { return x; }, start(t: number) { started.push(t); }, stop() {}, addEventListener() {} }),
   createPeriodicWave: () => ({}),
 };
 vi.mock('../src/audio/context', () => ({ resumeAudio: async () => fake, getAudioContext: () => fake }));
-vi.mock('../src/audio/violinSampler', () => ({ loadViolinSamples: async () => false, scheduleViolinNote: () => null }));
+vi.mock('../src/audio/violinSampler', () => ({ loadViolinSamples: async () => false, loadSampleSet: async () => false, scheduleViolinNote: () => null }));
 
 const n = (step: string, oct: number, dur: number, extra = '', grace = false) =>
   `<note>${grace ? '<grace/>' : ''}<pitch><step>${step}</step><octave>${oct}</octave></pitch>${grace ? '' : `<duration>${dur}</duration>`}<voice>1</voice><type>quarter</type>${extra}</note>`;

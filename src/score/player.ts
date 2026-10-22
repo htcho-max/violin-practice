@@ -2,11 +2,19 @@ import { resumeAudio } from '../audio/context';
 import { stringWave } from '../audio/timbre';
 import { midiToFreq } from '../audio/notes';
 import type { ParsedScore, ScoreNote } from './parse';
-import { loadViolinSamples, scheduleViolinNote } from '../audio/violinSampler';
+import { loadSampleSet, scheduleViolinNote, type SampleSet } from '../audio/violinSampler';
+import { getRoom, roomBus, type Room } from '../audio/room';
 import { noteClick, clearClicks } from '../audio/clicks';
 import { outputLatency } from '../audio/latency';
 
-export type Voice = 'sample' | 'synth';
+/** sample = 바이올린 한 대, ensemble = 현악 합주(바이올린 여러 대), synth = 합성음 */
+export type Voice = 'sample' | 'ensemble' | 'synth';
+export const VOICE_KEY = 'violin-voice';
+export function getVoice(): Voice {
+  try { const v = localStorage.getItem(VOICE_KEY); if (v === 'sample' || v === 'ensemble' || v === 'synth') return v; } catch { /* 무시 */ }
+  return 'sample';
+}
+export function saveVoice(v: Voice) { try { localStorage.setItem(VOICE_KEY, v); } catch { /* 무시 */ } }
 
 export interface PlayEvent { note: ScoreNote; time: number; dur: number; inst?: 'violin' | 'piano' } // 초
 /** 반주 파트 (parse 를 allNotes 로 읽은 것) */
@@ -103,7 +111,7 @@ export function expandOrnaments(e: PlayEvent, len: number): Piece[] {
 }
 
 /** 연주법에 따라 소리 내는 길이·어택·세기 (초 단위 길이 dur 기준) */
-export interface NoteShape { len: number; attack: number; gain: number; pizz: boolean }
+export interface NoteShape { len: number; attack: number; gain: number; pizz: boolean; /** 끝나고 사라지는 시간(초): 활을 떼면 줄이 조금 울림 */ release: number; slurIn: boolean }
 export function noteShape(e: PlayEvent): NoteShape {
   const a = e.note.art ?? {};
   const d = e.dur;
@@ -120,7 +128,9 @@ export function noteShape(e: PlayEvent): NoteShape {
   if (a.bow === 'down' && !a.slurIn && !a.accent) attack = Math.min(attack, 0.009); // 내림활은 조금 또렷하게
   // 셈여림 (mf 기준)
   if (a.vel !== undefined) gain *= Math.max(0.35, Math.min(1.5, a.vel / 0.78));
-  return { len, attack, gain, pizz: !!a.pizz };
+  // 이음줄로 다음 음에 이어지면 짧게 겹쳐 넘기고, 스타카토는 짧게 끊고, 보통은 줄이 살짝 울리며 사라짐
+  const release = a.slurNext && !a.stacc ? 0.06 : a.stacc ? 0.07 : 0.2;
+  return { len, attack, gain, pizz: !!a.pizz, release, slurIn: !!a.slurIn && !a.stacc };
 }
 
 const pluckCache = new Map<string, AudioBuffer>();
@@ -187,15 +197,18 @@ export class ScorePlayer {
 
   async play(
     plan: Plan,
-    opts: { a4: number; click: boolean | 'visual'; onBeat?: (k: number, accent: boolean) => void; volume?: number; voice?: Voice; onNote?: (e: PlayEvent | null, idx?: number) => void; onEnd?: () => void; mute?: boolean; accVolume?: number },
+    opts: { a4: number; click: boolean | 'visual'; onBeat?: (k: number, accent: boolean) => void; volume?: number; voice?: Voice; room?: Room; onNote?: (e: PlayEvent | null, idx?: number) => void; onEnd?: () => void; mute?: boolean; accVolume?: number },
   ) {
     this.stop();
     const gen = this.gen;
     const ctx = await resumeAudio();
     if (gen !== this.gen) return;
     this.ctx = ctx;
-    // 실제 바이올린 샘플 (못 불러오면 합성음으로)
-    const useSample = (opts.voice ?? 'sample') === 'sample' && (await loadViolinSamples(ctx));
+    // 실제 바이올린 샘플 (못 불러오면 합성음으로). 합주는 솔로도 함께 (아주 높은 음·실패 대비)
+    const voice = opts.voice ?? 'sample';
+    const [soloOk, ensOk] = voice === 'synth' ? [false, false] : await Promise.all([loadSampleSet(ctx, 'solo'), voice === 'ensemble' ? loadSampleSet(ctx, 'ensemble') : Promise.resolve(false)]);
+    const useSample = soloOk;
+    const set: SampleSet = ensOk ? 'ensemble' : 'solo';
     if (gen !== this.gen) return;
     this.playing = true;
     this.usedSample = useSample;
@@ -203,10 +216,14 @@ export class ScorePlayer {
     const wave = stringWave(ctx);
     const master = ctx.createGain();
     master.gain.value = opts.volume ?? 0.5;
+    // 울림 (방·공연장). 클릭 소리는 울림 없이 바로
+    const bus = roomBus(ctx, useSample ? (opts.room ?? getRoom()) : 'off');
+    master.connect(bus.input);
+    this.master = master; this.bus = bus;
     const lp = ctx.createBiquadFilter();
     lp.type = 'lowpass';
     lp.frequency.value = 3500;
-    lp.connect(master).connect(ctx.destination);
+    lp.connect(master);
     this.startedAt = t0;
     const accGain = ctx.createGain();
     accGain.gain.value = opts.accVolume ?? 0.6;
@@ -216,8 +233,11 @@ export class ScorePlayer {
     const visual = (abs: number, fn: () => void) => this.timers.push(setTimeout(fn, Math.max(0, (abs - ctx.currentTime + lat) * 1000)));
 
     /** 바이올린 소리 한 음 (샘플 → 합성음) */
-    const violinTone = (out: AudioNode, synthOut: AudioNode, midi: number, a: number, len: number, gain: number, attack: number, vib: boolean) => {
-      if (useSample) { const n = scheduleViolinNote(ctx, out, midi, a, len, opts.a4, gain, attack); if (n) { this.keep(n); return; } }
+    const violinTone = (out: AudioNode, synthOut: AudioNode, midi: number, a: number, len: number, gain: number, attack: number, vib: boolean, sh?: NoteShape, legato = false) => {
+      if (useSample) {
+        const n = scheduleViolinNote(ctx, out, midi, a, len, opts.a4, gain, attack, { set, level: sh?.gain ?? 1, release: legato ? 0.05 : sh?.release, slurIn: legato || sh?.slurIn });
+        if (n) { this.keep(n); return; }
+      }
       const osc = ctx.createOscillator();
       osc.setPeriodicWave(wave);
       const f = midiToFreq(midi, opts.a4);
@@ -251,7 +271,7 @@ export class ScorePlayer {
         const a = t0 + pc.time;
         const isMain = pc.time === e.time && pc.midi === e.note.midi && !e.note.art?.orn;
         if (sh.pizz) { this.keep(pluckNote(ctx, out, midiToFreq(pc.midi, opts.a4), a, isMain ? e.dur : pc.len, sh.gain)); continue; }
-        violinTone(out, synthOut, pc.midi, a, pc.len, base * sh.gain, pc.legato ? 0.008 : sh.attack, isMain && e.dur > 0.5);
+        violinTone(out, synthOut, pc.midi, a, pc.len, base * sh.gain, pc.legato ? 0.008 : sh.attack, isMain && e.dur > 0.5, sh, pc.legato);
       }
     };
 
@@ -305,14 +325,21 @@ export class ScorePlayer {
   }
 
   private pumpTimer: ReturnType<typeof setInterval> | null = null;
+  private master: GainNode | null = null;
+  private bus: { dispose: () => void; tail: number } | null = null;
 
   stop() {
     this.gen++;
+    // 멈출 때 '뚝' 끊기지 않게 아주 짧게 줄이고, 울림 꼬리가 끝나면 떼어 냄
+    const ctxNow = this.ctx?.currentTime ?? 0;
+    if (this.master) { this.master.gain.cancelScheduledValues(ctxNow); this.master.gain.setTargetAtTime(0, ctxNow, 0.015); }
+    if (this.bus) { const b = this.bus; setTimeout(() => b.dispose(), (b.tail + 0.3) * 1000); }
+    this.master = null; this.bus = null;
     if (this.pumpTimer) { clearInterval(this.pumpTimer); this.pumpTimer = null; }
     clearClicks();
     this.timers.forEach(clearTimeout);
     this.timers = [];
-    const now = this.ctx?.currentTime ?? 0;
+    const now = ctxNow + 0.08;
     for (const n of this.nodes) { try { n.stop(now); } catch { /* 이미 끝남 */ } }
     this.nodes.clear();
     this.playing = false;

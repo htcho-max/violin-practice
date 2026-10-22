@@ -1,0 +1,4 @@
+현악 합주(바이올린 섹션) 샘플 출처: npm 패키지 tiny-orchestra 0.2.0 의 samples/violins (CC0 1.0)
+원본: Versilian Studios Chamber Orchestra 2 - Community Edition (VSCO-2 CE), Strings/Violin Section/susVib
+https://github.com/sgossner/VSCO-2-CE  (CC0 1.0 Universal, public domain)
+파일 이름 끝 -f 는 세게(포르테), -p 는 여리게(피아노) 연주한 녹음입니다. 파일은 그대로 쓰고, 음정·크기 보정값은 src/audio/stringSamples.json 에 있습니다.

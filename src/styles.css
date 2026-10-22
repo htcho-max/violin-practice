@@ -620,3 +620,4 @@ button.mini.on { border-color: var(--accent); color: var(--accent); font-weight:
   .fc-reading { justify-content: flex-end; }
 }
 .ok-text { color: #15803d; }
+.segmented .seg-label { align-self: center; padding: 0 0.5em; font-size: 0.85em; opacity: 0.75; }

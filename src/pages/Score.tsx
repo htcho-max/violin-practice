@@ -8,7 +8,8 @@ import { DraftInput } from '../components/DraftInput';
 import { editNote, revertMeasure, shiftMarksAfterRest, type EditOp, type NoteType } from '../score/edit';
 import { alignNotes, summarizeScore, type Played, type Scored } from '../score/align';
 import { createOSMD, colorNotes, noteElements, showParts, paintNotes, setDrawRange, systemRows, staffBottoms } from '../score/osmd';
-import { planPlayback, scorePlayer, slicePlan, instFor, type Voice, type AccPart } from '../score/player';
+import { planPlayback, scorePlayer, slicePlan, instFor, getVoice, saveVoice, type Voice, type AccPart } from '../score/player';
+import { ROOMS, getRoom, setRoom, type Room } from '../audio/room';
 import { analyzeRhythm, rhythmTone } from '../score/rhythm';
 import { NoteSegmenter, equalRef } from '../audio/segment';
 import { pitchTracker } from '../audio/pitchTracker';
@@ -365,7 +366,10 @@ function ScoreView({ score, onClose, initial, notice, onOpenOther }: {
   };
   const [countIn, setCountIn] = useState(true);
   const [loop, setLoop] = useState(false);
-  const [voice, setVoice] = useState<Voice>('sample');
+  const [voice, setVoiceState] = useState<Voice>(getVoice);
+  const setVoice = (v: Voice) => { setVoiceState(v); saveVoice(v); };
+  const [room, setRoomState] = useState<Room>(getRoom);
+  const chooseRoom = (r: Room) => { setRoomState(r); setRoom(r); };
   const [voiceNote, setVoiceNote] = useState('');
   const [nowMeasure, setNowMeasure] = useState<number | null>(null);
   const [lenLock, setLenLock] = useState<number | null>(null);
@@ -874,6 +878,7 @@ function ScoreView({ score, onClose, initial, notice, onOpenOther }: {
       click: o.click ?? withClick,
       onBeat,
       voice,
+      room,
       mute: o.muteMine ?? (hasAcc && mute),
       onNote: (e, idx) => {
         if (e) curIdx.current = base + (idx ?? plan.events.indexOf(e));
@@ -889,7 +894,7 @@ function ScoreView({ score, onClose, initial, notice, onOpenOther }: {
         if (loopRef.current) playRangeRef.current(); else { highlight(null); setPlaying(false); }
       },
     });
-    setVoiceNote(voice === 'sample' && !scorePlayer.usedSample ? '바이올린 소리를 불러오지 못해서 합성음으로 재생해요. (첫 재생은 인터넷 연결이 필요해요)' : '');
+    setVoiceNote(voice !== 'synth' && !scorePlayer.usedSample ? '바이올린 소리를 불러오지 못해서 합성음으로 재생해요. (첫 재생은 인터넷 연결이 필요해요)' : '');
   }
   const playRangeRef = useRef(playRange);
   playRangeRef.current = playRange;
@@ -1222,9 +1227,16 @@ function ScoreView({ score, onClose, initial, notice, onOpenOther }: {
           {repeats && <label title="도돌이표·1·2번 괄호대로 펼쳐서 (구간 안에서). 채점은 악보 순서 그대로예요"><input type="checkbox" checked={unfold} onChange={(e) => setUnfold(e.target.checked)} disabled={playing || pausedAt !== null} data-testid="unfold" /> 도돌이표대로</label>}
         </div>
         <div className="segmented small">
-          <button className={voice === 'sample' ? 'on' : ''} onClick={() => setVoice('sample')} disabled={playing}>바이올린 녹음</button>
+          <button className={voice === 'sample' ? 'on' : ''} onClick={() => setVoice('sample')} disabled={playing} data-testid="voice-solo">바이올린</button>
+          <button className={voice === 'ensemble' ? 'on' : ''} onClick={() => setVoice('ensemble')} disabled={playing} data-testid="voice-ensemble" title="바이올린 여러 대가 함께 (음정이 조금 퍼져 들려요)">현악 합주</button>
           <button className={voice === 'synth' ? 'on' : ''} onClick={() => setVoice('synth')} disabled={playing}>합성음</button>
         </div>
+        {voice !== 'synth' && (
+          <div className="segmented small" role="group" aria-label="울림">
+            <span className="seg-label">울림</span>
+            {ROOMS.map((r) => <button key={r.id} className={room === r.id ? 'on' : ''} onClick={() => chooseRoom(r.id)} disabled={playing} data-testid={`room-${r.id}`}>{r.label}</button>)}
+          </div>
+        )}
         {hasAcc && (
           <div className="row-setting">
             <label><input type="checkbox" checked={accOn} onChange={(e) => setAccOn(e.target.checked)} data-testid="acc-on" /> 반주 같이</label>

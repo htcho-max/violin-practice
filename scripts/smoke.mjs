@@ -1126,6 +1126,33 @@ try {
     ok(errors.length === 0, `콘솔 오류 없음 ${errors.join(' | ')}`);
     await browser.close();
   }
+  // ── 소리: 현악 합주 + 공연장 울림 ──
+  {
+    const { browser, page, errors } = await launch('a445.wav');
+    await tab(page, '악보');
+    await page.getByTestId('score-file').setInputFiles(path.resolve('scripts/test-score.musicxml'));
+    await page.waitForTimeout(1500);
+    await page.getByTestId('voice-ensemble').click();
+    await page.getByTestId('room-hall').click();
+    await page.getByTestId('play-bpm').fill('200');
+    await page.getByTestId('play-toggle').click();
+    await page.waitForTimeout(2500);
+    const lit = await page.locator('[data-testid=osmd] .now-note').count();
+    ok(lit > 0, `합주 소리로 재생 (${lit})`);
+    const note = await page.locator('.hint', { hasText: '불러오지 못해서' }).count();
+    ok(note === 0, '합주 샘플 불러옴 (합성음 안내 없음)');
+    const keys = await page.evaluate(() => [localStorage.getItem('violin-voice'), localStorage.getItem('violin-reverb')]);
+    ok(keys[0] === 'ensemble' && keys[1] === 'hall', `소리 설정 저장 ${keys}`);
+    await page.getByTestId('play-toggle').click().catch(() => {});
+    await page.reload();
+    await tab(page, '악보');
+    await page.getByTestId('score-file').setInputFiles(path.resolve('scripts/test-score.musicxml'));
+    await page.waitForTimeout(1500);
+    const on = await page.getByTestId('voice-ensemble').getAttribute('class').catch(() => '');
+    ok(/\bon\b/.test(on ?? ''), `다시 열어도 합주 선택 (${on})`);
+    ok(errors.length === 0, `콘솔 오류 없음 ${errors.join(' | ')}`);
+    await browser.close();
+  }
 } catch (e) {
   console.log('FAIL 예외', e.message.split('\n')[0]);
   process.exitCode = 1;
