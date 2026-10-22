@@ -1109,6 +1109,23 @@ try {
     ok(errors.length === 0, `콘솔 오류 없음 ${errors.join(' | ')}`);
     await browser.close();
   }
+  // ── 여러 악보 한꺼번에 불러오기 ──
+  {
+    const { browser, page, errors } = await launch('a445.wav');
+    await tab(page, '악보');
+    await page.getByTestId('score-file').setInputFiles([path.resolve('scripts/test-score.musicxml'), path.resolve('scripts/repeat-score.musicxml')]);
+    await page.waitForTimeout(1500);
+    const m1 = await page.getByTestId('import-msg').textContent().catch(() => '');
+    ok(/악보 2개를 불러왔어요 \(2개 새로 넣음\)/.test(m1), `여러 파일 불러오기: ${m1}`);
+    let asked = '';
+    page.once('dialog', (d) => { asked = d.message(); d.accept(); });
+    await page.getByTestId('score-file').setInputFiles([path.resolve('scripts/test-score.musicxml'), path.resolve('scripts/repeat-score.musicxml')]);
+    await page.waitForTimeout(1500);
+    const m2 = await page.getByTestId('import-msg').textContent().catch(() => '');
+    ok(/이미 있는 악보 2개/.test(asked) && /2개 새 파일로 바꿈/.test(m2), `같은 제목은 새 파일로 바꾸기: ${m2}`);
+    ok(errors.length === 0, `콘솔 오류 없음 ${errors.join(' | ')}`);
+    await browser.close();
+  }
 } catch (e) {
   console.log('FAIL 예외', e.message.split('\n')[0]);
   process.exitCode = 1;

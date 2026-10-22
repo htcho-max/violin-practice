@@ -88,6 +88,7 @@ export function Score() {
   const [openId, setOpenId] = useState<number | null>(null);
   const [exView, setExView] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [importMsg, setImportMsg] = useState<string | null>(null);
   const [pieceForNew, setPieceForNew] = useState('');
   const [filter, setFilter] = useState<string>(() => { try { return localStorage.getItem('violin-score-folder') || 'all'; } catch { return 'all'; } });
   const [manage, setManage] = useState(false);
@@ -104,21 +105,52 @@ export function Score() {
   const [openNote, setOpenNote] = useState<{ id: number; text: string } | null>(null);
   const folderName = (id?: string) => folders.find((f) => f.id === id)?.name ?? '분류 안 됨';
 
-  async function importFile(f: File) {
-    setError(null);
+  /** 파일 하나 읽어 악보로 (저장은 안 함) */
+  async function readScoreFile(f: File, single: boolean): Promise<{ title: string; xml: string; folder: string; pieceId?: string }> {
+    if (/\.mxl$/i.test(f.name)) throw new Error('압축된 .mxl 은 아직 못 읽어요. MuseScore 등에서 "MusicXML(.musicxml)"로 내보내 주세요.');
+    const xml = await f.text();
+    const parsed = parseMusicXML(xml);
+    if (!parsed.notes.length) throw new Error('음표가 없는 악보예요.');
+    const pieceId = single ? pieceForNew || undefined : undefined;
+    const piece = pieces.find((p) => p.id === pieceId);
+    // 폴더: 고른 폴더 > 연결한 곡의 권 > 제목으로 짐작
+    const folder = filter !== 'all' && filter !== 'none' ? filter
+      : piece ? await folderForBook(piece.book)
+      : guessFolder(parsed.title, undefined, new Map([3, 2, 1].map((b) => [b, pieces.filter((p) => p.book === b).map((p) => p.title)])));
+    if (folder.startsWith('suzuki-')) await folderForBook(Number(folder.split('-')[1]));
+    return { title: parsed.title || f.name.replace(/\.(musicxml|xml)$/i, ''), xml, folder, pieceId };
+  }
+  /** 여러 파일 한꺼번에: 하나면 바로 열고, 여럿이면 모아서 넣고 결과를 알려 줌.
+   *  이미 있는 같은 제목 악보는 한 번 물어서 새 파일로 바꾸기 (연습 기록·내 표시·복습은 그대로) 또는 따로 넣기 */
+  async function importFiles(list: File[]) {
+    setError(null); setImportMsg(null);
     try {
-      if (/\.mxl$/i.test(f.name)) throw new Error('압축된 .mxl 은 아직 못 읽어요. MuseScore 등에서 "MusicXML(.musicxml)"로 내보내 주세요.');
-      const xml = await f.text();
-      const parsed = parseMusicXML(xml);
-      if (!parsed.notes.length) throw new Error('음표가 없는 악보예요.');
-      const piece = pieces.find((p) => p.id === pieceForNew);
-      // 폴더: 고른 폴더 > 연결한 곡의 권 > 제목으로 짐작
-      const folder = filter !== 'all' && filter !== 'none' ? filter
-        : piece ? await folderForBook(piece.book)
-        : guessFolder(parsed.title, undefined, new Map([3, 2, 1].map((b) => [b, pieces.filter((p) => p.book === b).map((p) => p.title)])));
-      if (folder.startsWith('suzuki-')) await folderForBook(Number(folder.split('-')[1]));
-      const id = await db.scores.add({ title: parsed.title, xml, pieceId: pieceForNew || undefined, folder, createdAt: Date.now() });
-      setOpenId(id);
+      if (list.length === 1) {
+        const r = await readScoreFile(list[0], true);
+        const id = await db.scores.add({ ...r, createdAt: Date.now() });
+        setOpenId(id);
+        return;
+      }
+      const ok: { title: string; xml: string; folder: string }[] = [];
+      const bad: string[] = [];
+      for (const f of list) {
+        try { ok.push(await readScoreFile(f, false)); } catch (e) { bad.push(`${f.name} (${(e as Error).message || '읽지 못함'})`); }
+      }
+      const existing = new Map(scores.filter((m) => !m.exercise).map((m) => [m.title, m.id]));
+      const dup = ok.filter((r) => existing.has(r.title));
+      let replace = false;
+      if (dup.length) replace = confirm(`이미 있는 악보 ${dup.length}개가 있어요 (${dup.slice(0, 3).map((d) => d.title).join(', ')}${dup.length > 3 ? ' …' : ''}).\n\n확인: 새 파일로 바꾸기 (연습 기록·내 표시는 그대로)\n취소: 따로 하나 더 넣기`);
+      let added = 0, replaced = 0;
+      const now = Date.now();
+      await db.transaction('rw', db.scores, async () => {
+        for (const [i, r] of ok.entries()) {
+          const old = existing.get(r.title);
+          if (replace && old !== undefined) { await db.scores.update(old, { xml: r.xml, origXml: undefined }); replaced++; }
+          else { await db.scores.add({ ...r, createdAt: now + i }); added++; }
+        }
+      });
+      const parts = [added ? `${added}개 새로 넣음` : '', replaced ? `${replaced}개 새 파일로 바꿈` : ''].filter(Boolean).join(', ');
+      setImportMsg(`악보 ${ok.length}개를 불러왔어요${parts ? ` (${parts})` : ''}.${bad.length ? ` 못 읽은 파일 ${bad.length}개: ${bad.join(' · ')}` : ''}`);
     } catch (e) {
       setError((e as Error).message || '악보를 불러오지 못했어요.');
     } finally {
@@ -218,9 +250,11 @@ export function Score() {
           <option value="">곡 연결 안 함</option>
           {pieces.map((p) => <option key={p.id} value={p.id}>{p.book}권 · {p.title}</option>)}
         </select>
-        <input ref={file} type="file" accept=".musicxml,.xml,.mxl,application/vnd.recordare.musicxml+xml,text/xml" hidden
-          onChange={(e) => e.target.files?.[0] && importFile(e.target.files[0])} data-testid="score-file" />
+        <input ref={file} type="file" multiple accept=".musicxml,.xml,.mxl,application/vnd.recordare.musicxml+xml,text/xml" hidden
+          onChange={(e) => e.target.files?.length && importFiles(Array.from(e.target.files))} data-testid="score-file" />
         <button className="primary wide" onClick={() => file.current?.click()}>파일에서 악보 불러오기</button>
+        <p className="hint small">여러 파일을 한꺼번에 고를 수 있어요 (길게 눌러 여러 개 선택). 하나면 바로 열고, 여럿이면 목록에 넣어요. 같은 제목 악보가 이미 있으면 새 파일로 바꿀지 물어봐요. 곡 연결은 한 파일일 때만 돼요.</p>
+        {importMsg && <p className="ok-text small" data-testid="import-msg">{importMsg}</p>}
         {error && <p className="error">{error}</p>}
       </div>
     </section>

@@ -619,3 +619,4 @@ button.mini.on { border-color: var(--accent); color: var(--accent); font-weight:
   .fc-pr-head { flex-direction: row; justify-content: space-between; align-items: center; text-align: left; }
   .fc-reading { justify-content: flex-end; }
 }
+.ok-text { color: #15803d; }
