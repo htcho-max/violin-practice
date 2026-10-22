@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach } from 'vitest';
-import { chartKeyFor, chartPosFor, spelledFrom, spotFromHint } from '../src/violin/fromScore';
+import { chartKeyFor, chartPositionsFor, spelledFrom, spotFromHint } from '../src/violin/fromScore';
 import { onFingeringRequest, peekFingeringRequest, requestFingering, takeFingeringRequest } from '../src/state/openRequest';
 
 describe('악보 음 → 운지표 자리', () => {
@@ -30,11 +30,17 @@ describe('악보 음 → 운지표 자리', () => {
     expect(chartKeyFor(73, 0, -6)).toBeNull(); // 운지표에 없는 조
     expect(chartKeyFor(70, 0, 2)).toBeNull(); // B♭ 은 라장조에도 없음
   });
-  it('포지션: 자리 포지션 > 지금 포지션 > 가장 낮은 자리', () => {
-    expect(chartPosFor(74, spotFromHint(74, { string: 1, pos: 4, finger: 4 }), 1)).toBe(4);
-    expect(chartPosFor(69, spotFromHint(69, { finger: 0 }), 3)).toBe(3);
-    expect(chartPosFor(74, null, 1)).toBe(1);
-    expect(chartPosFor(88, null, 1)).toBe(4); // E6: 1포지션에 없음 → 4포지션 4번
+  it('고른 포지션: 자리의 포지션이 꺼져 있으면 켬 (끄지는 않음)', () => {
+    expect(chartPositionsFor(74, spotFromHint(74, { string: 1, pos: 4, finger: 4 }), [1, 3])).toEqual([1, 3, 4]);
+    expect(chartPositionsFor(74, spotFromHint(74, { string: 2, pos: 3, finger: 1 }), [3, 1])).toEqual([1, 3]);
+    expect(chartPositionsFor(69, spotFromHint(69, { finger: 0 }), [3])).toEqual([3]); // 개방현은 그대로
+  });
+  it('자리가 없으면: 고른 포지션에 있으면 그대로, 없으면 가장 낮은 포지션을 켬', () => {
+    expect(chartPositionsFor(74, null, [3])).toEqual([3]); // D5 는 3rd 1 로 있음 → 1st 를 켜지 않음
+    expect(chartPositionsFor(88, null, [1, 3])).toEqual([1, 3, 4]); // E6: 4포지션 4번
+    expect(chartPositionsFor(69, null, [7])).toEqual([7]); // A4 는 개방현
+    expect(chartPositionsFor(58, null, [3])).toEqual([1, 3]); // A♯3: ½ 보다 1st 먼저
+    expect(chartPositionsFor(40, null, [1])).toEqual([1]); // 음역 밖
   });
   it('음 철자: 악보 철자 그대로, 안 맞으면 샵', () => {
     expect(spelledFrom(70, 'B', -1)).toEqual({ midi: 70, step: 'B', alter: -1, octave: 4 });

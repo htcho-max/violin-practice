@@ -914,13 +914,19 @@ try {
     ok(Number(await page.getByTestId('from').inputValue()) === 1 && Number(await page.getByTestId('to').inputValue()) === 2, `같은 구간 (${await page.getByTestId('from').inputValue()}~${await page.getByTestId('to').inputValue()})`);
     ok(!(await page.getByTestId('longpress-hint').isVisible().catch(() => false)), '한 번 써 보면 힌트 그만');
     // 포지션 추천을 켜고 D5 길게 누르기 → 그 자리가 목표, 휴대폰 뒤로 가기 → 악보
+    ok(await page.evaluate(() => JSON.stringify(JSON.parse(localStorage.getItem('violin-fingerchart')).positions) === '[1,3]'), '길게 누르기: 고른 포지션에 있는 음이면 포지션 그대로 (1st·3rd)');
     await page.getByTestId('pos-toggle').click();
     await page.waitForTimeout(800);
+    // 운지표에서 5th 만 골라 둔 상태 → 추천 자리의 포지션이 꺼져 있으면 켬 (5th 는 그대로)
+    await page.evaluate(() => localStorage.setItem('violin-fingerchart', JSON.stringify({ key: 'all', positions: [5] })));
     [x, y] = await headAt(3);
     await page.mouse.move(x, y); await page.mouse.down(); await page.waitForTimeout(650); await page.mouse.up();
     await page.waitForTimeout(800);
     const tg = await page.getByTestId('practice-target').textContent().catch(() => '');
     ok(/현 .*\(D5\)$/.test(tg), `포지션 추천 자리가 목표 (${tg})`);
+    const tgPos = (tg.match(/(\d)포지션/) || [])[1];
+    const onOf = async (p) => ((await page.getByTestId(`pos-${p}`).getAttribute('class')) || '').includes('on');
+    ok(!!tgPos && (await onOf(tgPos)) && (await onOf(5)), `길게 누르기: 자리 포지션(${tgPos})을 켜고 5th 는 그대로 (${await page.getByTestId('pos-summary').textContent()})`);
     await page.goBack();
     await page.waitForTimeout(1800);
     ok(await seen(page.getByTestId('osmd')), '휴대폰 뒤로 가기 → 악보 화면');
@@ -939,40 +945,66 @@ try {
   // ── 운지표 (튜너 탭 → 운지표): 음 줄(가로 스크롤) · 지판(가로/세로) · 짚어 보기 한 화면 (a445: A4 +20센트) ──
   {
     const { browser, page, errors } = await launch('a445.wav');
+    await page.evaluate(() => localStorage.setItem('violin-fingerchart', JSON.stringify({ key: 'all', maxPos: 3, pos: 5 })));
     await tab(page, '튜너');
     await page.getByTestId('view-chart').click();
     await page.waitForTimeout(300);
     ok(await page.evaluate(() => localStorage.getItem('violin-tuner-view') === 'chart'), '튜너 | 운지표 바꾸기 기억 (violin-tuner-view)');
     const cells = page.getByTestId('note-cell');
     const chipN = () => page.getByTestId('spot-chip').count();
-    ok((await cells.count()) === 40, `음 줄 칸 (반음 모두 · G3~A♯6) ${await cells.count()} (기대 40)`);
+    const isOn = async (p) => ((await page.getByTestId(`pos-${p}`).getAttribute('class')) || '').includes('on');
+    const onList = async () => { const o = []; for (const p of ['0.5', 1, 2, 3, 4, 5, 6, 7]) if (await isOn(p)) o.push(String(p)); return o.join(','); };
+    ok((await onList()) === '1,3', `옛 값(최고 포지션·포지션 하나)은 버리고 처음엔 1st·3rd (${await onList()})`);
+    ok((await cells.count()) === 33, `음 줄 칸 (반음 모두 · 1st·3rd: G3~D♯6) ${await cells.count()} (기대 33)`);
     ok(await page.evaluate(() => { const el = document.querySelector('[data-testid=note-list]'); return !!el && el.scrollWidth > el.clientWidth + 50; }), '음 줄은 가로로 스크롤');
-    ok((await page.locator('[data-testid=note-cell] .mini-staff').count()) === 40, '칸마다 작은 오선');
-    // 자리 글자 켜고 끄기 (기본 끔)
+    ok((await page.locator('[data-testid=note-cell] .mini-staff').count()) === 33, '칸마다 작은 오선');
+    // 자리 글자 켜고 끄기 (기본 끔) — 고른 포지션 자리만
     ok((await chipN()) === 0, `자리 글자 기본 끔 (${await chipN()})`);
     await page.getByTestId('fc-labels').check();
-    ok((await chipN()) === 228, `자리 글자 켜기 → 칸 아래 자리 ${await chipN()} (기대 228)`);
-    ok(/A현 1st 3/.test(await page.locator('[data-testid=note-cell][data-midi="74"]').textContent()), 'D5 칸 아래 "A현 1st 3"');
-    await page.getByTestId('maxpos-1').click();
-    ok((await chipN()) === 36 && (await cells.count()) === 30, `최고 포지션 1 → 칸 ${await cells.count()} · 자리 ${await chipN()} (기대 30 · 36)`);
-    await page.getByTestId('maxpos-7').click();
+    ok((await chipN()) === 68, `자리 글자 켜기 → 칸 아래 자리 ${await chipN()} (기대 68)`);
+    const d5txt = await page.locator('[data-testid=note-cell][data-midi="74"]').textContent();
+    ok(/A현 1st 3/.test(d5txt) && /A현 3rd 1/.test(d5txt) && !/2nd|4th|7th/.test(d5txt), `D5 칸 아래 "A현 1st 3 · A현 3rd 1"만 (${d5txt})`);
+    ok((await page.locator('[data-testid=note-cell][data-midi="73"] .spot-chip.stretch').textContent()) === 'D현 3rd 4 (늘림)', 'C♯5 칸: D현 3rd 4 (늘림) 표시');
+    // 포지션 칩 여러 개 고르기 → 음 줄 칸 수가 바뀜, 마지막 하나는 못 끔
+    await page.getByTestId('pos-3').click();
+    ok((await cells.count()) === 30 && (await chipN()) === 36, `3rd 끄기 → 1st 만: 칸 ${await cells.count()} · 자리 ${await chipN()} (기대 30 · 36)`);
+    await page.getByTestId('pos-1').click({ force: true }); // aria-disabled 라도 눌러 봄
+    ok((await isOn(1)) && (await cells.count()) === 30 && await seen(page.getByTestId('pos-last')), '마지막 하나(1st)는 끌 수 없음 · 안내');
+    ok((await page.getByTestId('pos-1').getAttribute('aria-disabled')) === 'true', '마지막 칩 aria-disabled');
+    await page.getByTestId('pos-7').click();
+    ok((await cells.count()) === 40 && (await onList()) === '1,7', `7th 켜기 → 1st·7th: 칸 ${await cells.count()} (기대 40)`);
+    ok(!/3rd/.test(await page.locator('[data-testid=note-cell][data-midi="74"]').textContent()) && /7th/.test(await page.locator('[data-testid=note-cell][data-midi="74"]').textContent()), 'D5 자리 글자도 고른 포지션 (1st·7th)');
+    await page.getByTestId('pos-7').click();
+    await page.getByTestId('pos-3').click();
+    ok((await onList()) === '1,3' && (await cells.count()) === 33, '다시 1st·3rd');
     await page.getByTestId('fc-labels').uncheck();
     ok((await chipN()) === 0, '자리 글자 끄기');
     await page.getByTestId('chart-key').selectOption('2');
-    ok((await cells.count()) === 23, `D장조만: 칸 ${await cells.count()} (기대 23)`);
+    ok((await cells.count()) === 19, `D장조만 (1st·3rd): 칸 ${await cells.count()} (기대 19)`);
     ok(/F♯4/.test(await page.getByTestId('note-list').textContent()) && !/F4/.test(await page.getByTestId('note-list').textContent()), 'D장조 철자 F♯ (F 없음)');
-    // 지판 (아직 음을 안 골랐을 때): 포지션 손가락 자리
-    await page.getByTestId('pos-3').click();
-    ok((await page.getByTestId('board-dot').count()) === 16, `D장조 3포지션 손가락 동그라미 ${await page.getByTestId('board-dot').count()} (기대 16)`);
+    // 지판 (아직 음을 안 골랐을 때): 고른 포지션 띠 · 합친 손가락 동그라미
+    const bandN = () => page.getByTestId('board-band').count();
+    ok((await bandN()) === 2, `지판 띠 수 = 고른 포지션 수 (${await bandN()})`);
+    ok((await page.getByTestId('board-dot').count()) === 23, `D장조 1st·3rd 손가락 동그라미 (같은 자리 합침) ${await page.getByTestId('board-dot').count()} (기대 23)`);
+    const d5dot = page.getByRole('button', { name: 'A현 1포지션 3번 (D5) / A현 3포지션 1번 (D5)' });
+    ok((await d5dot.count()) === 1 && (await d5dot.getAttribute('data-n')) === '2' && (await d5dot.locator('text').first().textContent()) === '3', 'D5 동그라미 하나로 합침 (번호 = 1st 손가락 3)');
+    const multiN = await page.locator('[data-testid=board-dot][data-n="2"]').count();
+    ok(multiN > 0 && (await page.getByTestId('board-badge').count()) === multiN && (await d5dot.getByTestId('board-badge').textContent()) === '1', `합친 자리마다 다음 포지션 번호 배지 (${multiN}곳, D5 배지 = 3rd 1)`);
+    await page.getByTestId('pos-1').click();
+    ok((await bandN()) === 1 && (await page.getByTestId('board-dot').count()) === 16, `3rd 만: 띠 1 · 동그라미 ${await page.getByTestId('board-dot').count()} (기대 16)`);
     ok((await page.getByRole('button', { name: 'A현 3포지션 1번 (D5)' }).count()) === 1, '3포지션 A현 1번 = D5');
+    await page.getByTestId('pos-5').click();
     await page.reload();
     await page.waitForTimeout(800);
     await tab(page, '튜너');
     ok(await seen(page.getByTestId('note-list')), '다시 열어도 운지표');
-    ok((await page.getByTestId('chart-key').inputValue()) === '2' && (await page.getByTestId('pos-3').getAttribute('class')).includes('on'), '고른 조·포지션 기억 (violin-fingerchart)');
+    ok((await page.getByTestId('chart-key').inputValue()) === '2' && (await onList()) === '3,5', `고른 조·포지션 기억 (violin-fingerchart) (${await onList()})`);
+    ok(await page.evaluate(() => { const p = JSON.parse(localStorage.getItem('violin-fingerchart')); return JSON.stringify(p.positions) === '[3,5]' && !('maxPos' in p) && !('pos' in p); }), 'localStorage positions 배열 (옛 maxPos·pos 없음)');
     await page.getByTestId('chart-key').selectOption('all');
     await page.getByTestId('pos-1').click();
-    ok((await page.getByTestId('board-dot').count()) === 32, `반음 모두: 줄마다 8자리 ${await page.getByTestId('board-dot').count()} (기대 32)`);
+    await page.getByTestId('pos-5').click();
+    await page.getByTestId('pos-3').click();
+    ok((await onList()) === '1' && (await page.getByTestId('board-dot').count()) === 32, `반음 모두 1st: 줄마다 8자리 ${await page.getByTestId('board-dot').count()} (기대 32)`);
     // 가로/세로 보기
     const bview = () => page.getByTestId('board').getAttribute('data-view');
     ok((await bview()) === 'v', `휴대폰 세로: 자동은 세로 지판 (${await bview()})`);
@@ -994,13 +1026,10 @@ try {
       return Math.abs(c.left + c.width / 2 - (s.left + s.width / 2));
     });
     ok(center < 30, `고른 칸은 가운데로 (${Math.round(center)}px)`);
-    await page.getByTestId('maxpos-1').click();
-    ok((await hitN()) === 2, `최고 포지션 1 → A4 자리 ${await hitN()} (기대 2)`);
-    await page.getByTestId('maxpos-7').click();
     await page.getByTestId('pos-5').click();
-    ok((await page.locator('[data-testid=board-hit][data-inpos="1"]').count()) === 1 && (await page.getByRole('button', { name: 'G현 5포지션 4번 (A4)' }).count()) === 1, '5포지션: G현 4번 자리가 진하게');
-    await page.getByTestId('pos-1').click();
-    ok((await page.getByTestId('practice-target').textContent()) === 'A4 짚기', `짚어 보기 목표 = 고른 음 (${await page.getByTestId('practice-target').textContent()})`);
+    ok((await page.locator('[data-testid=board-hit][data-inpos="1"]').count()) === 2 && (await page.getByRole('button', { name: 'G현 5포지션 4번 (A4)' }).count()) === 1, '5th 켜기: G현 5포지션 4번 자리도 진하게');
+    ok(/D현 1st 4/.test(await page.getByTestId('fc-legend').textContent()) && /G현 5th 4/.test(await page.getByTestId('fc-legend').textContent()), `설명에 고른 포지션 자리 모두 (${await page.getByTestId('fc-legend').textContent()})`);
+    await page.getByTestId('pos-5').click();
     // 짚어 보기: 마이크 → +20센트, 실시간 점
     await page.getByTestId('practice-mic').click();
     await page.waitForTimeout(2500);
@@ -1019,8 +1048,8 @@ try {
     [lstr, lsem] = await ls();
     ok(lstr === '2' && Math.abs(lsem - 0.2) < 0.06, `목표 줄(A현) 위 실시간 점 (${lstr} · ${lsem})`);
     ok(await seen(page.getByTestId('practice-now-bar')), '마이크 켜면 아래에 지금 음 띠');
-    await shotTall(page, 'scripts/shot-fb-phone.png');
     await page.getByTestId('pos-3').click();
+    await page.getByTestId('pos-1').click();
     await page.getByTestId('practice-pick').click();
     await page.waitForTimeout(800);
     const tg = await page.getByTestId('practice-target').textContent();
@@ -1048,13 +1077,22 @@ try {
     ok((await page.getByTestId('practice-tally').textContent()) === '맞힘 2 / 시도 2', `맞힘 2 / 시도 2 (${await page.getByTestId('practice-tally').textContent()})`);
     await page.getByTestId('practice-auto').uncheck();
     ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), '휴대폰: 가로 넘침 없음');
+    // 휴대폰: 1st·3rd · D5 고른 상태
+    await page.getByTestId('pos-1').click();
+    await page.locator('[data-testid=note-cell][data-midi="74"]').click();
+    await page.waitForTimeout(600);
+    const lg = await page.getByTestId('fc-legend').textContent();
+    ok(/A현 1st 3 · A현 3rd 1/.test(lg), `D5 고르면 설명에 고른 포지션 번호 모두 (${lg})`);
+    ok((await page.getByTestId('board-band').count()) === 2 && (await page.locator('[data-testid=board-hit][data-inpos="1"]').getAttribute('data-n')) === '2', '지판: 띠 2 · D5 자리 하나에 1st·3rd');
+    ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), '휴대폰 (1st·3rd · D5): 가로 넘침 없음');
+    await shotTall(page, 'scripts/shot-fb-phone.png');
     // 태블릿 가로: 자동은 가로 지판
     await page.setViewportSize({ width: 1180, height: 820 });
     await page.waitForTimeout(300);
     ok((await bview()) === 'h', `태블릿: 자동은 가로 지판 (${await bview()})`);
     await page.locator('[data-testid=note-cell][data-midi="74"]').click();
-    await page.getByTestId('pos-1').click();
     await page.waitForTimeout(1200);
+    ok((await onList()) === '1,3', `태블릿: 1st·3rd (${await onList()})`);
     ok(await seen(page.getByTestId('live-dot')), '태블릿: 실시간 점');
     await shotTall(page, 'scripts/shot-fb-tablet.png');
     ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), '가로 넘침 없음');
@@ -1064,7 +1102,6 @@ try {
     await tab(dark, '튜너');
     await dark.getByTestId('view-chart').click();
     await dark.locator('[data-testid=note-cell][data-midi="74"]').click();
-    await dark.getByTestId('pos-3').click();
     await dark.waitForTimeout(500);
     ok((await dark.getByTestId('board-hit').count()) === 2, `어두운 화면: D5 자리 ${await dark.getByTestId('board-hit').count()} (기대 2)`);
     await shotTall(dark, 'scripts/shot-fb-dark.png');

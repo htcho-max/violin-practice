@@ -486,7 +486,9 @@ button.mini.on { border-color: var(--accent); color: var(--accent); font-weight:
 
 
 /* ── 운지표 (튜너 탭): 음 줄 · 지판 · 짚어 보기 한 화면 ── */
-:root { --f1: #7cb4f5; --f2: #6fd6a8; --f3: #f4c063; --f4: #f29bc4; --ivory: #f1e9d2; --fb-ink: #1d1a16; }
+:root { --f1: #7cb4f5; --f2: #6fd6a8; --f3: #f4c063; --f4: #f29bc4; --ivory: #f1e9d2; --fb-ink: #1d1a16;
+  /* 포지션 색 (띠·칩 점): ½·4th 보라, 1st·5th 청록, 2nd·6th 연두, 3rd·7th 주황 */
+  --pt0: #c084fc; --pt1: #2dd4bf; --pt2: #a3e635; --pt3: #fb923c; }
 .tuner-switch { max-width: 280px; align-self: center; width: 100%; }
 .fc-page { width: 100%; }
 @media (min-width: 720px) { .fc-page { max-width: 1040px; margin: 0 auto; } }
@@ -496,12 +498,21 @@ button.mini.on { border-color: var(--accent); color: var(--accent); font-weight:
 .fc-bar2 { justify-content: space-between; }
 .fc-key { display: flex; align-items: center; gap: 6px; }
 .fc-key select { min-height: 40px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); padding: 4px 8px; }
-.fc-maxpos, .fc-view { display: flex; align-items: center; gap: 6px; font-size: 14px; }
-.fc-maxpos .segmented button { min-width: 34px; }
+.fc-view { display: flex; align-items: center; gap: 6px; font-size: 14px; }
+.fc-posbox { display: flex; align-items: center; gap: 6px; flex: 1 1 360px; min-width: 0; max-width: 600px; font-size: 14px; }
+.fc-pos-title { flex: 0 0 auto; }
+.fc-pos .chip { display: inline-flex; align-items: center; justify-content: center; gap: 3px; }
+.fc-pos .chip[aria-disabled=true] { cursor: not-allowed; }
+.pos-dot { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto; opacity: .35; background: var(--pd); box-shadow: 0 0 0 1px rgba(0,0,0,.25); }
+.chip.on .pos-dot { opacity: 1; }
+.pos-dot.t0, .fb-band-g.t0, .fb-mark.t0 { --pd: var(--pt0); } .pos-dot.t1, .fb-band-g.t1, .fb-mark.t1 { --pd: var(--pt1); }
+.pos-dot.t2, .fb-band-g.t2, .fb-mark.t2 { --pd: var(--pt2); } .pos-dot.t3, .fb-band-g.t3, .fb-mark.t3 { --pd: var(--pt3); }
+.fc-sel { font-size: 13px; }
+.fc-last { margin: -4px 0 0; color: var(--warn); }
 .fc-view .segmented button { min-width: 46px; }
 .fc-toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; cursor: pointer; min-height: 40px; }
 .fc-toggle input { width: 18px; height: 18px; margin: 0; flex: 0 0 auto; }
-.fc-pos { gap: 5px; flex-wrap: nowrap; flex: 1 1 320px; max-width: 560px; min-width: 0; }
+.fc-pos { gap: 4px; flex-wrap: nowrap; flex: 1 1 auto; min-width: 0; }
 .fc-pos .chip { flex: 1 1 0; min-width: 0; padding: 6px 2px; min-height: 38px; }
 
 /* 음 줄 (가로 스크롤) */
@@ -535,12 +546,18 @@ button.mini.on { border-color: var(--accent); color: var(--accent); font-weight:
 .fb-shadow { fill: #000; opacity: .22; filter: blur(3px); }
 .fb-wood { stroke: #0b0907; stroke-width: 1; }
 @media (prefers-color-scheme: dark) { .fb-wood { stroke: #4a4036; } .fb-shadow { opacity: .5; } }
-.fb-band { fill: var(--accent); opacity: .17; }
+.fb-band { fill: var(--pd, var(--accent)); opacity: .14; }
+.fb-band-edge { stroke: var(--pd, var(--accent)); stroke-width: 2; stroke-opacity: .7; fill: none; }
+.fb-badge.t0 { --pd: var(--pt0); } .fb-badge.t1 { --pd: var(--pt1); } .fb-badge.t2 { --pd: var(--pt2); } .fb-badge.t3 { --pd: var(--pt3); }
+.fb-dot .fb-badge circle { fill: var(--pd) !important; stroke: #15120f !important; stroke-width: 1.5 !important; opacity: 1 !important; stroke-dasharray: none !important; }
+.fb-dot .fb-badge text { fill: #15120f !important; font-weight: 800; opacity: 1 !important; }
+.fb-dot.dim:not(.sel) > .fb-badge { opacity: .55; }
 .fb-semi { stroke: #fff; stroke-opacity: .055; stroke-width: 1; }
 .fb-pearl { fill: #efe8da; opacity: .32; }
 .fb-mark.now .fb-pearl { opacity: .6; }
 .fb-poslabel { fill: var(--muted); font-size: 11px; font-weight: 600; }
-.fb-mark.now .fb-poslabel { fill: var(--accent); font-weight: 800; }
+.fb-mark.now .fb-poslabel { fill: var(--pd, var(--accent)); font-weight: 800; }
+@media (prefers-color-scheme: light) { .fb-mark.now .fb-poslabel { fill: color-mix(in srgb, var(--pd, var(--accent)) 62%, #000); } }
 .fb-nut { stroke: var(--ivory); stroke-width: 7; stroke-linecap: round; }
 .fb-string-shadow { stroke: #000; opacity: .45; }
 .fb-str.s0 .fb-string { stroke: #b7a57c; } .fb-str.s1 .fb-string { stroke: #c4b892; }
@@ -565,6 +582,8 @@ button.mini.on { border-color: var(--accent); color: var(--accent); font-weight:
 .fb-dot.hit.in text.fb-name { fill: #fff; font-weight: 800; }
 .fb-dot.hit.other circle:not(.fb-back) { opacity: .45; stroke: #fff; stroke-dasharray: 2 2; stroke-width: 1.2; }
 .fb-other { fill: #d9d2c4 !important; font-weight: 700 !important; }
+/* 세로 지판: 이름은 동그라미 오른쪽 (.fb-dot text 의 middle 보다 먼저) */
+.fc-board.v .fb-dot text.fb-name, .fc-board.v .fb-dot text.fb-other { text-anchor: start; }
 .fb-dot.sel circle:not(.fb-halo):not(.fb-back) { stroke: var(--accent); stroke-width: 3.5; }
 .fb-join { stroke: var(--ivory); stroke-opacity: .7; stroke-width: 3; stroke-linecap: round; }
 .fb-live { pointer-events: none; transition: transform .05s; }

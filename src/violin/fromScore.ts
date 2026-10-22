@@ -2,7 +2,7 @@
  * 악보에서 길게 누른 음 → 운지표: 자리(줄·포지션·손가락) 찾기, 조 거르기 정하기, 음 철자.
  */
 import { CHART_POSITIONS, chartSpots, type ChartSpot } from '../score/fingering';
-import { CHART_KEYS, noteHits, hitInPos, spell, type ChartKey, type Spelled } from './fingerchart';
+import { CHART_KEYS, spell, spotsIn, type ChartKey, type Spelled } from './fingerchart';
 
 const STEP_PC: Record<string, number> = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
 
@@ -23,7 +23,8 @@ export interface SpotHint { string?: number; pos?: number; finger?: number }
  */
 export function spotFromHint(midi: number, hint?: SpotHint | null): ChartSpot | null {
   if (!hint || (hint.string === undefined && hint.pos === undefined && hint.finger === undefined)) return null;
-  const all = chartSpots(midi, 7);
+  // 보통 포지션 먼저 (추천·내 표시), ½ 포지션은 맨 뒤
+  const all = [...chartSpots(midi, 7), ...spotsIn(midi, [0.5]).filter((s) => !s.open)];
   const match = (h: SpotHint) => all.filter((s) =>
     (h.string === undefined || s.string === h.string)
     && (h.finger === undefined || (h.finger === 0 ? s.open : !s.open && s.finger === h.finger))
@@ -48,14 +49,17 @@ export function chartKeyFor(midi: number, current: ChartKey, fifths?: number): C
 }
 
 /**
- * 운지표 포지션: 자리가 정해졌으면 그 포지션 (개방현은 지금 포지션 그대로),
- * 아니면 지금 포지션에서 짚을 수 있으면 그대로, 없으면 그 음이 있는 가장 낮은 포지션.
+ * 운지표 고른 포지션 맞추기 (켜기만, 끄지는 않음):
+ * 자리가 정해졌고 그 포지션이 꺼져 있으면 켬 (개방현은 그대로).
+ * 자리가 없으면 — 고른 포지션(또는 개방현)에서 낼 수 있으면 그대로, 아니면 그 음을 낼 수 있는 가장 낮은 포지션을 켬
+ * (보통 자리 먼저: ½·늘림은 그것밖에 없을 때만).
  */
-export function chartPosFor(midi: number, spot: ChartSpot | null, current: number): number {
-  if (spot && !spot.open && CHART_POSITIONS.includes(spot.pos)) return spot.pos;
-  if (spot?.open) return current;
-  const hits = noteHits(midi, 7);
-  if (!hits.length || hits.some((h) => hitInPos(h, current))) return current;
-  const low = chartSpots(midi, 7).find((s) => !s.open);
-  return low ? low.pos : current;
+export function chartPositionsFor(midi: number, spot: ChartSpot | null, selected: readonly number[]): number[] {
+  const sel = CHART_POSITIONS.filter((p) => selected.includes(p));
+  const withPos = (p: number) => (sel.includes(p) ? sel : CHART_POSITIONS.filter((x) => x === p || sel.includes(x)));
+  if (spot) return !spot.open && CHART_POSITIONS.includes(spot.pos) ? withPos(spot.pos) : sel;
+  const all = spotsIn(midi);
+  if (!all.length || all.some((s) => s.open || sel.includes(s.pos))) return sel;
+  const low = all.filter((s) => s.pos >= 1 && !s.stretch).sort((a, b) => a.pos - b.pos)[0] ?? [...all].sort((a, b) => a.pos - b.pos)[0];
+  return withPos(low.pos);
 }

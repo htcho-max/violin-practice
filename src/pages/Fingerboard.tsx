@@ -5,7 +5,7 @@ import { centsBetween, freqToNote, midiToFreq } from '../audio/notes';
 import { PitchSmoother } from '../audio/smooth';
 import { planPlayback, scorePlayer } from '../score/player';
 import type { ParsedScore, ScoreNote } from '../score/parse';
-import { STRINGS, STRING_NAMES, chartSpots, posBase, type ChartSpot } from '../score/fingering';
+import { STRINGS, STRING_NAMES, posBase, type ChartSpot } from '../score/fingering';
 import { solfaName } from '../score/solfa';
 import { tolFor, toneOf } from '../score/tolerance';
 import { useSettings } from '../state/settings';
@@ -14,26 +14,27 @@ import { useWakeLock } from '../state/wakeLock';
 import { useBackLayer } from '../state/back';
 import { requestScore, takeFingeringRequest, type FingeringRequest } from '../state/openRequest';
 import type { TabId } from '../components/TabBar';
-import { chartKeyFor, chartPosFor, spelledFrom, spotFromHint } from '../violin/fromScore';
+import { chartKeyFor, chartPositionsFor, spelledFrom, spotFromHint } from '../violin/fromScore';
 import {
-  CHART_KEYS, CHART_POSITIONS, autoBoard, enharmonic, fretPos, hitInPos, keyShape, liveString, nextInRun, noteHits, noteRows,
-  positionSpots, posLabel, randomSpot, scaleRun, spell, spelledName, spotChip, spotMidi, spotTitle,
-  type BoardView, type ChartKey, type Hit, type NoteRow, type Spelled,
+  CHART_KEYS, CHART_POSITIONS, DEFAULT_POSITIONS, autoBoard, boardDots, boardJoins, cleanPositions, enharmonic, fretPos, hitIn, liveString,
+  nextInRun, noteHits, noteRows, posLabel, positionBand, randomSpot, scaleRun, spell, spelledName, spotChip, spotMidi, spotShort, spotTitle,
+  togglePosition, type BoardView, type ChartKey, type Hit, type NoteRow, type Spelled,
 } from '../violin/fingerchart';
 
-interface Prefs { key: number | 'all'; maxPos: number; pos: number; labels: boolean; board: BoardView; autoNext: boolean }
+/** positions: 고른 포지션 (여러 개, 하나 이상) — 음 줄·자리 글자·지판·짚어 보기가 함께 씀 */
+interface Prefs { key: number | 'all'; positions: number[]; labels: boolean; board: BoardView; autoNext: boolean }
 const PREF_KEY = 'violin-fingerchart';
 const BOARD_VIEWS: { id: BoardView; label: string }[] = [{ id: 'auto', label: '자동' }, { id: 'h', label: '가로' }, { id: 'v', label: '세로' }];
 function loadPrefs(): Prefs {
-  const d: Prefs = { key: 'all', maxPos: 7, pos: 1, labels: false, board: 'auto', autoNext: false };
+  const d: Prefs = { key: 'all', positions: DEFAULT_POSITIONS, labels: false, board: 'auto', autoNext: false };
   try {
+    // 옛 값 (maxPos·pos 하나 고르기)은 버리고 처음엔 1·3포지션
     const p = { ...d, ...JSON.parse(localStorage.getItem(PREF_KEY) || '{}') } as Prefs;
     if (p.key !== 'all' && !CHART_KEYS.some((k) => k.id === p.key)) p.key = d.key;
-    if (![1, 3, 5, 7].includes(p.maxPos)) p.maxPos = d.maxPos;
-    if (!CHART_POSITIONS.includes(p.pos)) p.pos = d.pos;
+    p.positions = cleanPositions(p.positions) ?? d.positions;
     if (!BOARD_VIEWS.some((b) => b.id === p.board)) p.board = d.board;
     p.labels = p.labels === true; p.autoNext = p.autoNext === true;
-    return { key: p.key, maxPos: p.maxPos, pos: p.pos, labels: p.labels, board: p.board, autoNext: p.autoNext };
+    return { key: p.key, positions: p.positions, labels: p.labels, board: p.board, autoNext: p.autoNext };
   } catch { return d; }
 }
 
@@ -74,6 +75,15 @@ export function Fingerboard({ go }: { go?: (t: TabId) => void } = {}) {
   useEffect(() => { try { localStorage.setItem(PREF_KEY, JSON.stringify(prefs)); } catch { /* 무시 */ } }, [prefs]);
   const set = (p: Partial<Prefs>) => setPrefs((o) => ({ ...o, ...p }));
   const key: ChartKey = prefs.key === 'all' ? null : prefs.key;
+  const sel = prefs.positions;
+  const selText = sel.map(posLabel).join('·');
+  const [lastNote, setLastNote] = useState(false);
+  const togglePos = (p: number) => {
+    if (sel.length === 1 && sel[0] === p) { setLastNote(true); return; }
+    setLastNote(false);
+    set({ positions: togglePosition(sel, p) });
+  };
+  useEffect(() => { if (!lastNote) return; const t = setTimeout(() => setLastNote(false), 2500); return () => clearTimeout(t); }, [lastNote]);
   const autoView = useAutoBoard();
   const view = prefs.board === 'auto' ? autoView : prefs.board;
   const [target, setTargetRaw] = useState<Target | null>(null);
@@ -108,11 +118,8 @@ export function Fingerboard({ go }: { go?: (t: TabId) => void } = {}) {
     if (!r) return;
     const spot = spotFromHint(r.midi, r.spot);
     const k = chartKeyFor(r.midi, key, r.fifths);
-    const pos = chartPosFor(r.midi, spot, prefs.pos);
-    // 음 줄에 보이도록 최고 포지션도 (자리 또는 그 음의 가장 낮은 자리까지)
-    const need = spot ? spot.pos : Math.min(...chartSpots(r.midi, 7).map((s) => s.pos), 1);
-    const maxPos = prefs.maxPos >= need ? prefs.maxPos : [1, 3, 5, 7].find((p) => p >= need) ?? 7;
-    set({ key: k === null ? 'all' : k, pos, maxPos });
+    // 그 자리(또는 그 음)의 포지션이 꺼져 있으면 켬 — 끄지는 않음
+    set({ key: k === null ? 'all' : k, positions: chartPositionsFor(r.midi, spot, prefs.positions) });
     setTarget({ midi: r.midi, note: spelledFrom(r.midi, r.step, r.alter), spot });
     setRet(r.back ?? null);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -124,8 +131,8 @@ export function Fingerboard({ go }: { go?: (t: TabId) => void } = {}) {
   };
   useBackLayer(!!ret && !!go, backToScore);
 
-  const run = useMemo(() => scaleRun(prefs.pos, key), [prefs.pos, key]);
-  /** 음계 따라 짚기: 지금 조·포지션 안에서 다음 음 */
+  const run = useMemo(() => scaleRun(sel, key), [sel, key]);
+  /** 음계 따라 짚기: 고른 포지션들·조 안에서 다음 음 */
   const stepRun = (from: number | null) => {
     const n = nextInRun(run, from, dir.current);
     if (!n) return;
@@ -135,8 +142,8 @@ export function Fingerboard({ go }: { go?: (t: TabId) => void } = {}) {
   /** 다음 자리: 다음 음 자동이면 음계 다음 음, 아니면 무작위 (맞힌 뒤에는 지금 목표의 포지션에서 이어서) */
   const next = (keepPos = false) => {
     if (prefs.autoNext) { stepRun(target?.midi ?? null); return; }
-    const p = keepPos && target?.spot && !target.spot.open ? target.spot.pos : prefs.pos;
-    const s = randomSpot(p, key, Math.random, target?.midi);
+    const ps = keepPos && target?.spot && !target.spot.open && sel.includes(target.spot.pos) ? [target.spot.pos] : sel;
+    const s = randomSpot(ps, key, Math.random, target?.midi);
     if (!s) { setTarget(null); return; }
     setTarget({ spot: s, midi: spotMidi(s), note: s.note });
   };
@@ -181,22 +188,24 @@ export function Fingerboard({ go }: { go?: (t: TabId) => void } = {}) {
     }
   }, [pitch.reading]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // 실시간 점: 목표 줄 (또는 들리는 음을 지금 포지션에서 낼 수 있는 줄) 위, 센트까지 반영한 자리
-  const hitMax = Math.max(prefs.maxPos, prefs.pos, target?.spot?.pos ?? 0);
-  const hits = useMemo(() => (target ? noteHits(target.midi, hitMax) : []), [target, hitMax]);
+  // 실시간 점: 목표 줄 (또는 들리는 음을 고른 포지션에서 낼 수 있는 줄) 위, 센트까지 반영한 자리
+  // 고른 음 자리는 모든 포지션 (고르지 않은 포지션은 옅게 참고용)
+  const hits = useMemo(() => (target ? noteHits(target.midi) : []), [target]);
   let live: { string: number; semis: number; tone: string } | null = null;
   if (pitch.on && smooth) {
     const m = smooth.midi + smooth.cents / 100;
-    const prefer = hits.filter((h) => hitInPos(h, prefs.pos)).map((h) => h.string);
-    const s = liveString(m, prefs.pos, target?.spot ? target.spot.string : null, prefs.maxPos, prefer);
+    const prefer = hits.filter((h) => hitIn(h, sel).length).map((h) => h.string);
+    const s = liveString(m, sel, target?.spot ? target.spot.string : null, prefer);
     if (s !== null && m - STRINGS[s] > -1) {
       const tone = target ? toneOf((m - target.midi) * 100, tol) : 'idle';
       live = { string: s, semis: m - STRINGS[s], tone };
     }
   }
 
-  const rows = useMemo(() => noteRows(key, prefs.maxPos), [key, prefs.maxPos]);
+  const rows = useMemo(() => noteRows(key, sel), [key, sel]);
   const nHits = hits.length;
+  const selSpots = hits.flatMap((h) => hitIn(h, sel));
+  const otherN = hits.filter((h) => !hitIn(h, sel).length).length;
 
   return (
     <div className="page-sub fingerchart">
@@ -210,10 +219,18 @@ export function Fingerboard({ go }: { go?: (t: TabId) => void } = {}) {
             {CHART_KEYS.map((k) => <option key={String(k.id)} value={k.id === null ? 'all' : String(k.id)}>{k.label}</option>)}
           </select>
         </label>
-        <div className="fc-maxpos">
-          <span>최고 포지션</span>
-          <div className="segmented small">
-            {[1, 3, 5, 7].map((p) => <button key={p} className={prefs.maxPos === p ? 'on' : ''} onClick={() => set({ maxPos: p })} data-testid={`maxpos-${p}`}>{p}</button>)}
+        <div className="fc-posbox">
+          <span className="fc-pos-title">포지션</span>
+          <div className="chips fc-pos" role="group" aria-label="포지션 고르기 (여러 개)">
+            {CHART_POSITIONS.map((p) => {
+              const on = sel.includes(p), last = on && sel.length === 1;
+              return (
+                <button key={p} className={`chip ${on ? 'on' : ''}`} aria-pressed={on} aria-disabled={last || undefined} onClick={() => togglePos(p)} data-testid={`pos-${p}`}
+                  title={last ? '하나는 켜 둬야 해요' : undefined}>
+                  <i className={`pos-dot t${posTone(p)}`} aria-hidden="true" />{posLabel(p)}
+                </button>
+              );
+            })}
           </div>
         </div>
         <label className="fc-toggle">
@@ -222,14 +239,12 @@ export function Fingerboard({ go }: { go?: (t: TabId) => void } = {}) {
         </label>
       </div>
 
+      {lastNote && <p className="hint fc-last" role="status" data-testid="pos-last">포지션은 하나 이상 골라야 해요.</p>}
+
       <NoteStrip rows={rows} chartKey={key} labels={prefs.labels} selected={target?.midi ?? null} onSelect={selectNote} />
 
       <div className="fc-bar fc-bar2">
-        <div className="chips fc-pos" role="group" aria-label="포지션">
-          {CHART_POSITIONS.map((p) => (
-            <button key={p} className={`chip ${prefs.pos === p ? 'on' : ''}`} onClick={() => set({ pos: p })} data-testid={`pos-${p}`}>{posLabel(p)}</button>
-          ))}
-        </div>
+        <span className="muted fc-sel" data-testid="pos-summary">고른 포지션 {selText}</span>
         <div className="fc-view">
           <span>지판</span>
           <div className="segmented small" role="group" aria-label="지판 보기">
@@ -241,11 +256,15 @@ export function Fingerboard({ go }: { go?: (t: TabId) => void } = {}) {
         </div>
       </div>
 
-      <Board view={view} pos={prefs.pos} chartKey={key} target={target} hits={hits} live={live} onPick={pickSpot} />
-      <p className="hint fc-legend">
+      <Board view={view} positions={sel} chartKey={key} target={target} hits={hits} live={live} onPick={pickSpot} />
+      <p className="hint fc-legend" data-testid="fc-legend">
         {target
-          ? `${spelledName(target.note)} 자리 ${nHits}곳 — 진한 자리는 ${posLabel(prefs.pos)} 포지션 안, 옅은 자리는 다른 포지션이에요.`
-          : key === null ? '반음 자리를 모두 보여 줘요. 같은 번호가 두 개면 낮은·높은 자리예요.' : '조의 음만 보여 줘요. 막대는 반음으로 붙은 손가락이에요.'}
+          ? (selSpots.length
+            ? <><b>{spelledName(target.note)}</b> {selSpots.map(spotShort).join(' · ')}{otherN ? ` — 옅은 자리 ${otherN}곳은 다른 포지션이에요.` : ''}</>
+            : <><b>{spelledName(target.note)}</b> 고른 포지션에는 자리가 없어요. 옅은 자리를 참고해요.</>)
+          : sel.length > 1
+            ? '띠 색은 포지션이에요. 겹치는 자리는 큰 번호가 낮은 포지션, 작은 색 번호가 다음 포지션 손가락이에요.'
+            : key === null ? '반음 자리를 모두 보여 줘요. 같은 번호가 두 개면 낮은·높은 자리예요.' : '조의 음만 보여 줘요. 막대는 반음으로 붙은 손가락이에요.'}
         {' '}점선은 4번을 늘려 닿는 자리예요.
       </p>
 
@@ -282,7 +301,7 @@ export function Fingerboard({ go }: { go?: (t: TabId) => void } = {}) {
         <label className="fc-toggle fc-auto">
           <input type="checkbox" checked={prefs.autoNext} data-testid="practice-auto"
             onChange={(e) => { set({ autoNext: e.target.checked }); if (e.target.checked && !target) { dir.current = 1; const n = nextInRun(run, null, 1); if (n) setTarget({ midi: n.item.note.midi, note: n.item.note, spot: n.item }); } }} />
-          <span>다음 음 자동 <small className="muted">맞으면 {posLabel(prefs.pos)} 포지션 음계의 다음 음으로 (끝에서 내려와요)</small></span>
+          <span>다음 음 자동 <small className="muted">맞으면 고른 포지션({selText}) 안 음을 차례로 (끝에서 내려와요)</small></span>
         </label>
         <button className={`primary wide ${pitch.on ? 'stop' : ''}`} onClick={pitch.on ? pitch.stop : pitch.start} data-testid="practice-mic">
           {pitch.on ? '마이크 끄기' : '마이크 켜기'}
@@ -353,36 +372,43 @@ function makePt(g: Geo) {
   };
 }
 
-interface BoardSpot extends ChartSpot { note: Spelled; semis: number }
-function boardSpots(pos: number, key: ChartKey, s: number): BoardSpot[] {
-  if (key === null) return positionSpots(pos, s, key).map((b) => ({ ...b, semis: spotMidi(b) - STRINGS[s] }));
-  // 조를 고르면 손가락 1~4 하나씩 (반음으로 붙은 손가락은 막대로)
-  return keyShape(key, pos, s).map((f) => ({ string: s, pos, finger: f.finger, rel: f.rel, open: false, stretch: f.rel === 8, note: f.note, semis: f.semis }));
-}
+/** 포지션 색 (띠·칩 점): 이웃한 포지션은 다른 색 */
+const posTone = (p: number) => CHART_POSITIONS.indexOf(p) % 4;
 
-function Board({ view, pos, chartKey, target, hits, live, onPick }: {
-  view: 'h' | 'v'; pos: number; chartKey: ChartKey; target: Target | null; hits: Hit[];
+function Board({ view, positions, chartKey, target, hits, live, onPick }: {
+  view: 'h' | 'v'; positions: number[]; chartKey: ChartKey; target: Target | null; hits: Hit[];
   live: { string: number; semis: number; tone: string } | null; onPick: (s: ChartSpot, n: Spelled) => void;
 }) {
   const g = GEO[view];
   const pt = makePt(g);
-  const spots = [0, 1, 2, 3].map((s) => boardSpots(pos, chartKey, s));
-  const all = spots.flat();
-  const lo = Math.min(...all.map((b) => b.semis), 99), hi = Math.max(...all.map((b) => b.semis), 0);
+  const dots = boardDots(positions, chartKey);
+  const joins = boardJoins(positions, chartKey);
+  const bands = positions.map((p) => positionBand(p, chartKey)).filter((b): b is NonNullable<typeof b> => !!b);
   const hitAt = (s: number, semis: number) => hits.find((h) => h.string === s && h.semis === semis);
   const chosen = (s: number, semis: number) => !!target?.spot && target.spot.string === s && spotMidi(target.spot) - STRINGS[s] === semis;
   const openSpot = (s: number): ChartSpot => ({ string: s, pos: 0, finger: 0, rel: 0, open: true, stretch: false });
   const quad = (s0: number, s1: number, n0: number, n1: number) => `M${pt(s0, n0)} L${pt(s1, n0)} L${pt(s1, n1)} L${pt(s0, n1)} Z`;
   // 지판 (줄감개 쪽이 좁은 사다리꼴)
   const outline = quad(-0.62, 3.62, 0, N_END);
-  const bandPath = all.length ? quad(-0.55, 3.55, Math.max(0, lo - 0.5), hi + 0.5) : null;
   const sw = [3.4, 2.7, 2.0, 1.4]; // G 가장 굵게
-  const nameOff = (x: number, y: number): [number, number, 'start' | 'middle'] => (g.h ? [x, y + g.r + g.fs * 0.95, 'middle'] : [x + g.r + 3, y + g.fs * 0.35, 'start']);
+  const nameOff = (x: number, y: number, big = 0): [number, number, 'start' | 'middle'] => (g.h ? [x, y + g.r + big + g.fs * 0.95, 'middle'] : [x + g.r + big + 3, y + g.fs * 0.35, 'start']);
   const fingerCls = (f: number) => `f${Math.max(0, Math.min(4, f))}`;
+  /** 합친 자리: 다음 고른 포지션의 손가락 번호를 작은 배지로 (색 = 그 포지션 띠 색) */
+  const badge = (x: number, y: number, sp: ChartSpot | undefined, big = 0) => {
+    if (!sp) return null;
+    const br = g.h ? 7.5 : 7, k = (g.r + big) * 0.78;
+    const [bx, by] = g.h ? [x + k, y - k] : [x - k, y - k]; // 세로 지판은 이름이 오른쪽이라 왼쪽 위
+    return (
+      <g className={`fb-badge t${posTone(sp.pos)}`} data-testid="board-badge">
+        <circle cx={bx} cy={by} r={br} />
+        <text x={bx} y={by + br * 0.45} style={{ fontSize: br * 1.3 }}>{sp.finger}</text>
+      </g>
+    );
+  };
 
   return (
     <div className={`fc-board-wrap ${view}`}>
-      <svg className={`fc-board ${view}`} viewBox={`0 0 ${g.W} ${g.H}`} role="img" aria-label={`${posLabel(pos)} 포지션 지판 (${view === 'h' ? '가로' : '세로'})`} data-testid="board" data-view={view}>
+      <svg className={`fc-board ${view}`} viewBox={`0 0 ${g.W} ${g.H}`} role="img" aria-label={`${positions.map(posLabel).join('·')} 포지션 지판 (${view === 'h' ? '가로' : '세로'})`} data-testid="board" data-view={view}>
         <defs>
           <linearGradient id={`fb-ebony-${view}`} x1="0" y1="0" x2={g.h ? '0' : '1'} y2={g.h ? '1' : '0'}>
             <stop offset="0" stopColor="#15120f" /><stop offset="0.45" stopColor="#2c2621" /><stop offset="0.55" stopColor="#2a241f" /><stop offset="1" stopColor="#120f0c" />
@@ -395,7 +421,17 @@ function Board({ view, pos, chartKey, target, hits, live, onPick }: {
         <path d={outline} className="fb-shadow" transform={g.h ? 'translate(0 4)' : 'translate(3 3)'} />
         <path d={outline} fill={`url(#fb-ebony-${view})`} className="fb-wood" />
         <path d={outline} fill={`url(#fb-sheen-${view})`} />
-        {bandPath && <path d={bandPath} className="fb-band" data-testid="board-band" />}
+        {/* 고른 포지션마다 옅은 띠 (색은 포지션 칩 점과 같음) */}
+        {bands.map((b) => {
+          const n0 = Math.max(0, b.lo - 0.5), n1 = b.hi + 0.5;
+          const e = (n: number) => { const [p0, p1] = [pt(-0.55, n), pt(3.55, n)]; return `M${p0} L${p1}`; };
+          return (
+            <g key={b.pos} className={`fb-band-g t${posTone(b.pos)}`} data-testid="board-band" data-pos={b.pos}>
+              <path d={quad(-0.55, 3.55, n0, n1)} className="fb-band" />
+              <path d={`${e(n0)} ${e(n1)}`} className="fb-band-edge" />
+            </g>
+          );
+        })}
         {/* 반음 자리 (아주 옅게) */}
         {Array.from({ length: N_END - 1 }, (_, i) => i + 1).map((n) => {
           const [a, b] = [pt(-0.45, n), pt(3.45, n)];
@@ -408,7 +444,7 @@ function Board({ view, pos, chartKey, target, hits, live, onPick }: {
           const [lx, ly] = pt(-0.7, n);
           const [dx, dy] = g.h ? [7, 0] : [0, 7];
           return (
-            <g key={p} className={`fb-mark ${p === pos ? 'now' : ''}`}>
+            <g key={p} className={`fb-mark ${positions.includes(p) ? `now t${posTone(p)}` : ''}`}>
               {p === 7
                 ? <><circle cx={x - dx} cy={y - dy} r={2.2} className="fb-pearl" /><circle cx={x + dx} cy={y + dy} r={2.2} className="fb-pearl" /></>
                 : <circle cx={x} cy={y} r={2.3} className="fb-pearl" />}
@@ -444,50 +480,50 @@ function Board({ view, pos, chartKey, target, hits, live, onPick }: {
             </g>
           );
         })}
-        {/* 지금 포지션 손가락 자리 */}
-        {[0, 1, 2, 3].map((s) => spots[s].map((b, i) => {
-          const prev = spots[s][i - 1];
-          const join = chartKey !== null && prev && b.semis - prev.semis === 1;
-          const [x, y] = pt(s, b.semis);
-          const hit = hitAt(s, b.semis);
+        {/* 반음으로 붙은 손가락 막대 (조를 고르면) */}
+        {joins.map((jn) => {
+          const [px, py] = pt(jn.string, jn.from), [x, y] = pt(jn.string, jn.to);
+          const o = g.r + 5;
+          return g.h
+            ? <line key={`${jn.string}-${jn.from}`} x1={px} x2={x} y1={py - o} y2={y - o} className="fb-join" />
+            : <line key={`${jn.string}-${jn.from}`} x1={px - o} x2={x - o} y1={py} y2={y} className="fb-join" />;
+        })}
+        {/* 고른 포지션 손가락 자리: 같은 자리는 하나로 (번호 = 낮은 포지션 손가락, 겹치면 테두리 두 겹) */}
+        {dots.map((d) => {
+          if (hitAt(d.string, d.semis)) return null;
+          const b = d.spots[0];
+          const multi = d.spots.length > 1;
+          const [x, y] = pt(d.string, d.semis);
           const [nx, ny, na] = nameOff(x, y);
-          let bar: JSX.Element | null = null;
-          if (join) {
-            const [px, py] = pt(s, prev.semis);
-            const o = g.r + 5;
-            bar = g.h ? <line x1={px} x2={x} y1={py - o} y2={y - o} className="fb-join" /> : <line x1={px - o} x2={x - o} y1={py} y2={y} className="fb-join" />;
-          }
+          const name = spelledName(d.note);
           return (
-            <g key={`${s}-${b.rel}`}>
-              {bar}
-              {!hit && (
-                <g className={`fb-dot ${fingerCls(b.finger)} ${b.stretch ? 'stretch' : ''} ${target ? 'dim' : ''} ${chosen(s, b.semis) ? 'sel' : ''}`} role="button"
-                  aria-label={spotTitle(b, spelledName(b.note))} onClick={() => onPick(b, b.note)} data-testid="board-dot">
-                  <circle cx={x} cy={y} r={g.r + 1} className="fb-back" />
-                  <circle cx={x} cy={y} r={g.r} />
-                  <text x={x} y={y + g.fs * 0.36} style={{ fontSize: g.fs }}>{b.finger}</text>
-                  <text x={nx} y={ny} textAnchor={na} className="fb-name" style={{ fontSize: g.fs - 1.5 }}>{spelledName(b.note).replace(/\d+$/, '')}</text>
-                </g>
-              )}
+            <g key={`${d.string}-${d.semis}`} className={`fb-dot ${fingerCls(b.finger)} ${b.stretch ? 'stretch' : ''} ${multi ? 'multi' : ''} ${target ? 'dim' : ''} ${chosen(d.string, d.semis) ? 'sel' : ''}`} role="button"
+              aria-label={d.spots.map((sp) => spotTitle(sp, name)).join(' / ')} onClick={() => onPick(b, d.note)} data-testid="board-dot" data-n={d.spots.length}>
+              <circle cx={x} cy={y} r={g.r + 1} className="fb-back" />
+              <circle cx={x} cy={y} r={g.r} />
+              <text x={x} y={y + g.fs * 0.36} style={{ fontSize: g.fs }}>{b.finger}</text>
+              {multi && badge(x, y, d.spots[1])}
+              <text x={nx} y={ny} textAnchor={na} className="fb-name" style={{ fontSize: g.fs - 1.5 }}>{name.replace(/\d+$/, '')}</text>
             </g>
           );
-        }))}
-        {/* 고른 음 자리: 지금 포지션 안은 진하게, 다른 포지션은 옅게 + 포지션 이름 */}
+        })}
+        {/* 고른 음 자리: 고른 포지션 안은 진하게 (번호 = 낮은 포지션 손가락), 다른 포지션은 옅게 + 포지션 이름 */}
         {target && hits.filter((h) => !h.open).map((h) => {
-          const inPos = hitInPos(h, pos);
-          const sp = inPos ?? h.spots[0];
+          const ins = hitIn(h, positions);
+          const inPos = ins[0] ?? null;
+          const sp = inPos ?? h.spots.find((x) => x.pos >= 1) ?? h.spots[0];
           const [x, y] = pt(h.string, h.semis);
-          const [nx, ny, na] = nameOff(x, y);
-          
-          const others = h.spots.filter((s) => s !== inPos).map((s) => `${posLabel(s.pos)}${s.finger}`);
+          const [nx, ny, na] = nameOff(x, y, inPos ? 3.5 : 0);
+          const others = h.spots.filter((s) => !ins.includes(s)).map((s) => `${posLabel(s.pos)}${s.finger}`);
           return (
             <g key={h.string} className={`fb-dot hit ${inPos ? 'in' : 'other'} ${fingerCls(sp.finger)} ${sp.stretch ? 'stretch' : ''} ${chosen(h.string, h.semis) ? 'sel' : ''}`} role="button"
-              aria-label={spotTitle(sp, spelledName(target.note))} onClick={() => onPick(sp, target.note)} data-testid="board-hit" data-inpos={inPos ? '1' : '0'}>
+              aria-label={(ins.length ? ins : [sp]).map((x) => spotTitle(x, spelledName(target.note))).join(' / ')} onClick={() => onPick(sp, target.note)} data-testid="board-hit" data-inpos={inPos ? '1' : '0'} data-n={ins.length}>
               {inPos && <circle cx={x} cy={y} r={g.r + 8} className="fb-halo" filter={`url(#fb-glow-${view})`} />}
               <circle cx={x} cy={y} r={(inPos ? g.r + 3.5 : g.r) + 1} className="fb-back" />
               <circle cx={x} cy={y} r={inPos ? g.r + 3.5 : g.r} />
               <text x={x} y={y + g.fs * 0.38} style={{ fontSize: inPos ? g.fs + 2 : g.fs - 1 }}>{inPos ? sp.finger : ''}</text>
-              {inPos && <text x={nx} y={ny + (g.h ? 3 : 0)} textAnchor={na} className="fb-name strong" style={{ fontSize: g.fs }}>{spelledName(target.note)}</text>}
+              {ins.length > 1 && badge(x, y, ins.find((x2) => !x2.open && x2 !== inPos), 3.5)}
+              {inPos && <text x={nx} y={ny} textAnchor={na} className="fb-name strong" style={{ fontSize: g.fs }}>{spelledName(target.note)}</text>}
               {!inPos && <text x={nx} y={ny} textAnchor={na} className="fb-other" style={{ fontSize: g.fs - 2 }}>{others.slice(0, 2).join('·')}</text>}
             </g>
           );

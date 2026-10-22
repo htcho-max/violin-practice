@@ -3,7 +3,7 @@
  * 조별 손가락 모양 ("1 2|3 4"), 지판 위 반음 자리 (실제 줄 길이 비율).
  * 자리 규칙은 포지션 추천(score/fingering.ts)과 같음.
  */
-import { CHART_POSITIONS, STRINGS, STRING_NAMES, chartSpots, posLabel, relSpot, type ChartSpot } from '../score/fingering';
+import { CHART_POSITIONS, STRINGS, STRING_NAMES, posBase, posLabel, relSpot, type ChartSpot } from '../score/fingering';
 import { keyAlterOf } from '../score/solfa';
 import { keyName } from '../score/transpose';
 
@@ -53,13 +53,47 @@ export function enharmonic(midi: number): Spelled | null {
 }
 
 export interface NoteRow { note: Spelled; spots: ChartSpot[] }
-/** 음 목록: G3 부터 위로, 고른 조의 음만, 최고 포지션까지의 자리 */
-export function noteRows(key: ChartKey, maxPos = 7): NoteRow[] {
+
+/** 처음 고른 포지션 (1·3포지션) */
+export const DEFAULT_POSITIONS = [1, 3];
+/** 고른 포지션 정리: 알맞은 것만, 낮은 것부터, 겹침 없이 (비면 null) */
+export function cleanPositions(v: unknown): number[] | null {
+  if (!Array.isArray(v)) return null;
+  const out = CHART_POSITIONS.filter((p) => v.includes(p));
+  return out.length ? out : null;
+}
+/** 포지션 칩 켜고 끄기 — 마지막 하나는 끌 수 없음 */
+export function togglePosition(sel: number[], p: number): number[] {
+  if (sel.includes(p)) return sel.length > 1 ? sel.filter((x) => x !== p) : sel;
+  return CHART_POSITIONS.filter((x) => x === p || sel.includes(x));
+}
+
+/**
+ * 한 음을 고른 포지션들에서 낼 수 있는 자리 (개방현은 언제나, ½ 포지션 포함).
+ * 낮은 포지션부터, 같은 포지션은 낮은 줄부터 — 개방현은 맨 앞.
+ */
+export function spotsIn(midi: number, positions: readonly number[] = CHART_POSITIONS): ChartSpot[] {
+  const out: ChartSpot[] = [];
+  for (let st = 0; st < 4; st++) if (midi === STRINGS[st]) out.push({ string: st, pos: 0, finger: 0, rel: 0, open: true, stretch: false });
+  for (const pos of CHART_POSITIONS) {
+    if (!positions.includes(pos)) continue;
+    for (let st = 0; st < 4; st++) {
+      const o = midi - STRINGS[st];
+      if (o < 1) continue;
+      const rel = o - posBase(pos) + 2;
+      if (rel < 1 || rel > 8) continue;
+      out.push({ string: st, pos, finger: relSpot(pos, rel).finger, rel, open: false, stretch: rel === 8 });
+    }
+  }
+  return out;
+}
+/** 음 목록: G3 부터 위로, 고른 조의 음만, 고른 포지션(또는 개방현)에서 낼 수 있는 음만 */
+export function noteRows(key: ChartKey, positions: readonly number[] = CHART_POSITIONS): NoteRow[] {
   const out: NoteRow[] = [];
   for (let m = LOW; m <= HIGH; m++) {
     const note = spell(m, key);
     if (!note) continue;
-    const spots = chartSpots(m, maxPos);
+    const spots = spotsIn(m, positions);
     if (spots.length) out.push({ note, spots });
   }
   return out;
@@ -108,31 +142,84 @@ export function keyShape(fifths: number, pos: number, string: number): ShapeFing
   return spots.slice(0, 4).map((s, i) => ({ finger: i + 1, rel: s.rel, semis: relSpot(pos, s.rel).semis, note: s.note }));
 }
 
+/** 지판 위 손가락 자리 하나 (그 포지션 안) */
+export interface BoardSpot extends ChartSpot { note: Spelled; semis: number }
+/** 한 포지션·줄의 지판 자리: 반음 모두면 자리 모두, 조를 고르면 손가락 1~4 하나씩 */
+export function boardSpots(pos: number, key: ChartKey, s: number): BoardSpot[] {
+  if (key === null) return positionSpots(pos, s, key).map((b) => ({ ...b, semis: spotMidi(b) - STRINGS[s] }));
+  return keyShape(key, pos, s).map((f) => ({ string: s, pos, finger: f.finger, rel: f.rel, open: false, stretch: f.rel === 8, note: f.note, semis: f.semis }));
+}
+/** 고른 포지션들의 자리를 합친 동그라미: 같은 줄·같은 반음은 하나로 (spots 는 낮은 포지션부터, 동그라미 번호 = spots[0]) */
+export interface BoardDot { string: number; semis: number; note: Spelled; spots: BoardSpot[] }
+export function boardDots(positions: readonly number[], key: ChartKey): BoardDot[] {
+  const by = new Map<string, BoardDot>();
+  for (const p of CHART_POSITIONS) {
+    if (!positions.includes(p)) continue;
+    for (let s = 0; s < 4; s++) for (const b of boardSpots(p, key, s)) {
+      const k = `${s}:${b.semis}`;
+      const d = by.get(k) ?? { string: s, semis: b.semis, note: b.note, spots: [] };
+      d.spots.push(b);
+      by.set(k, d);
+    }
+  }
+  return [...by.values()].sort((a, b) => a.string - b.string || a.semis - b.semis);
+}
+/** 조를 고르면 반음으로 붙은 손가락 막대 (포지션마다 이웃한 손가락 · 같은 막대는 하나로) */
+export function boardJoins(positions: readonly number[], key: ChartKey): { string: number; from: number; to: number }[] {
+  if (key === null) return [];
+  const seen = new Set<string>();
+  const out: { string: number; from: number; to: number }[] = [];
+  for (const p of CHART_POSITIONS) {
+    if (!positions.includes(p)) continue;
+    for (let s = 0; s < 4; s++) {
+      const b = boardSpots(p, key, s);
+      for (let i = 1; i < b.length; i++) {
+        if (b[i].semis - b[i - 1].semis !== 1) continue;
+        const k = `${s}:${b[i - 1].semis}`;
+        if (seen.has(k)) continue;
+        seen.add(k);
+        out.push({ string: s, from: b[i - 1].semis, to: b[i].semis });
+      }
+    }
+  }
+  return out;
+}
+/** 지판 띠: 포지션마다 손가락 자리가 닿는 반음 범위 */
+export function positionBand(pos: number, key: ChartKey): { pos: number; lo: number; hi: number } | null {
+  const all = [0, 1, 2, 3].flatMap((s) => boardSpots(pos, key, s));
+  if (!all.length) return null;
+  return { pos, lo: Math.min(...all.map((b) => b.semis)), hi: Math.max(...all.map((b) => b.semis)) };
+}
+/** 자리 설명 글자: 개방현은 "A현 개방", 손가락은 "A현 1st 3" (늘림 표시) */
+export const spotShort = (s: ChartSpot) => (s.open ? `${stringLabel(s.string)} 개방` : spotChip(s));
+
 /** 지판: 줄 길이 L 에서 n 반음 자리 (줄감개 쪽 끝 = 0) */
 export const fretPos = (n: number, L = 1) => L * (1 - Math.pow(2, -n / 12));
 
-/** 고른 포지션·조 안에서 무작위 자리 (개방현 빼고) */
-export function randomSpot(pos: number, key: ChartKey, rnd = Math.random, avoid?: number): (ChartSpot & { note: Spelled }) | null {
-  const all = [0, 1, 2, 3].flatMap((s) => positionSpots(pos, s, key)).filter((s) => !s.stretch);
+/** 고른 포지션들·조 안에서 무작위 자리 (개방현·늘림 빼고) */
+export function randomSpot(positions: readonly number[], key: ChartKey, rnd = Math.random, avoid?: number): (ChartSpot & { note: Spelled }) | null {
+  const all = positions.flatMap((p) => [0, 1, 2, 3].flatMap((s) => positionSpots(p, s, key))).filter((s) => !s.stretch);
   const pool = all.length > 1 && avoid !== undefined ? all.filter((s) => spotMidi(s) !== avoid) : all;
   return pool.length ? pool[Math.floor(rnd() * pool.length)] : null;
 }
 
 /* ── 한 화면 운지표: 음 자리 강조 · 실시간 점 · 음계 따라 짚기 ── */
 
-/** 한 음을 낼 수 있는 지판 위 자리 (같은 줄 같은 곳은 포지션이 여럿이어도 하나로) */
+/** 한 음을 낼 수 있는 지판 위 자리 (같은 줄 같은 곳은 포지션이 여럿이어도 하나로). 기본은 모든 포지션 */
 export interface Hit { string: number; semis: number; open: boolean; spots: ChartSpot[] }
-export function noteHits(midi: number, maxPos = 7): Hit[] {
+export function noteHits(midi: number, positions: readonly number[] = CHART_POSITIONS): Hit[] {
   const by = new Map<number, Hit>();
-  for (const sp of chartSpots(midi, maxPos)) {
+  for (const sp of spotsIn(midi, positions)) {
     const h = by.get(sp.string) ?? { string: sp.string, semis: midi - STRINGS[sp.string], open: sp.open, spots: [] };
     h.spots.push(sp);
     by.set(sp.string, h);
   }
   return [...by.values()].sort((a, b) => a.string - b.string);
 }
-/** 그 자리를 지금 포지션에서 짚을 수 있으면 그 자리 (개방현은 어느 포지션에서나) */
+/** 그 자리를 그 포지션에서 짚을 수 있으면 그 자리 (개방현은 어느 포지션에서나) */
 export const hitInPos = (h: Hit, pos: number) => h.spots.find((s) => s.open || s.pos === pos) ?? null;
+/** 그 자리를 고른 포지션들에서 짚는 방법 (낮은 포지션부터, 개방현은 언제나) */
+export const hitIn = (h: Hit, positions: readonly number[]) => h.spots.filter((s) => s.open || positions.includes(s.pos));
 
 /** 지판 보기: 자동이면 넓은 화면(가로 폭 ≥ 720) 또는 가로 방향일 때 가로 */
 export type BoardView = 'auto' | 'h' | 'v';
@@ -140,23 +227,26 @@ export const autoBoard = (width: number, landscape: boolean): 'h' | 'v' => (widt
 
 /**
  * 실시간 점을 그릴 줄: 목표가 줄까지 정해졌으면 그 줄,
- * 아니면 들리는 음을 지금 포지션에서 낼 수 있는 줄 (목표 음 자리가 있는 줄 먼저, 그다음 손가락 자리, 개방현).
- * 지금 포지션에 없으면 낮은 포지션의 자리, 바이올린 음역 밖이면 null.
+ * 아니면 들리는 음을 고른 포지션에서 낼 수 있는 줄 (목표 음 자리가 있는 줄 먼저, 그다음 낮은 포지션 손가락 자리, 개방현).
+ * 고른 포지션에 없으면 가장 낮은 포지션의 자리, 바이올린 음역 밖이면 null.
  */
-export function liveString(midiFloat: number, pos: number, targetString: number | null, maxPos = 7, prefer: number[] = []): number | null {
+export function liveString(midiFloat: number, positions: readonly number[], targetString: number | null, prefer: number[] = []): number | null {
   if (targetString !== null) return targetString;
-  const spots = chartSpots(Math.round(midiFloat), 7);
+  const spots = spotsIn(Math.round(midiFloat));
   if (!spots.length) return null;
-  const inPos = spots.filter((s) => !s.open && s.pos === pos);
-  const pick = inPos.find((s) => prefer.includes(s.string)) ?? inPos[0] ?? spots.find((s) => s.open) ?? spots.find((s) => s.pos <= maxPos) ?? spots[0];
+  const inPos = spots.filter((s) => !s.open && positions.includes(s.pos));
+  const pick = inPos.find((s) => prefer.includes(s.string)) ?? inPos[0] ?? spots.find((s) => s.open) ?? spots.find((s) => s.pos >= 1) ?? spots[0];
   return pick.string;
 }
 
-/** 음계 따라 짚기: 지금 조·포지션 안에서 낮은 음 → 높은 음 (손가락 자리 먼저 — 낮은 줄, 늘림 빼고 · 없으면 개방현) */
-export function scaleRun(pos: number, key: ChartKey): (ChartSpot & { note: Spelled })[] {
+/**
+ * 음계 따라 짚기: 고른 포지션들·조 안의 음을 낮은 음 → 높은 음.
+ * 같은 음은 낮은 포지션 자리 먼저 (같은 포지션은 낮은 줄 · 늘림 빼고), 손가락 자리가 없으면 개방현.
+ */
+export function scaleRun(positions: readonly number[], key: ChartKey): (ChartSpot & { note: Spelled })[] {
   const by = new Map<number, ChartSpot & { note: Spelled }>();
   const add = (s: ChartSpot & { note: Spelled }) => { if (!by.has(s.note.midi)) by.set(s.note.midi, s); };
-  for (let st = 0; st < 4; st++) for (const s of positionSpots(pos, st, key)) if (!s.stretch) add(s);
+  for (const p of CHART_POSITIONS) if (positions.includes(p)) for (let st = 0; st < 4; st++) for (const s of positionSpots(p, st, key)) if (!s.stretch) add(s);
   for (let st = 0; st < 4; st++) {
     const note = spell(STRINGS[st], key);
     if (note) add({ string: st, pos: 0, finger: 0, rel: 0, open: true, stretch: false, note });
