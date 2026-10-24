@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { liveQuery } from 'dexie';
 import { db, type SevcikPack } from '../data/db';
-import { importPack, deletePack, groupsOf, variantScore, packProgress, setSixth, lastVariant, rememberVariant, SIXTH_KEY, type VariantProgress } from '../data/sevcik';
+import { importPack, deletePack, groupsOf, variantScore, packProgress, setStartPos, lastVariant, rememberVariant, sortPacks, packLabel, SIXTH_KEY, type VariantProgress } from '../data/sevcik';
 import { createOSMD, setDrawRange, showParts } from '../score/osmd';
 import { parseMusicXML } from '../score/parse';
 
@@ -9,7 +9,7 @@ import { parseMusicXML } from '../score/parse';
 export default function Sevcik({ onOpen, onBack }: { onOpen: (scoreId: number) => void; onBack: () => void }) {
   const [packs, setPacks] = useState<SevcikPack[] | null>(null);
   useEffect(() => {
-    const sub = liveQuery(() => db.sevcikPacks.toArray()).subscribe({ next: setPacks, error: () => setPacks([]) });
+    const sub = liveQuery(() => db.sevcikPacks.toArray()).subscribe({ next: (ps) => setPacks(sortPacks(ps)), error: () => setPacks([]) });
     return () => sub.unsubscribe();
   }, []);
   const [packId, setPackId] = useState<string | null>(() => { try { return localStorage.getItem('violin-sevcik-pack'); } catch { return null; } });
@@ -29,24 +29,30 @@ export default function Sevcik({ onOpen, onBack }: { onOpen: (scoreId: number) =
   const cur = pack?.variants.find((v) => v.n === n);
   const maxN = nums.length ? nums[nums.length - 1] : 0;
 
-  async function load(f: File) {
+  async function load(fs: File[]) {
     setError(null); setMsg(null); setBusy(true);
-    try {
-      const p = await importPack(f);
-      setPackId(p.id);
-      setMsg(`"${p.title}" 변형 ${p.variants.length}개를 불러왔어요.`);
-    } catch (e) { setError((e as Error).message); } finally { setBusy(false); if (file.current) file.current.value = ''; }
+    const okList: { title: string; count: number }[] = [], bad: string[] = [];
+    let lastId: string | null = null;
+    for (const f of fs) {
+      try { const p = await importPack(f); okList.push({ title: p.title, count: p.variants.length }); lastId = p.id; } catch { bad.push(f.name); }
+    }
+    if (lastId) setPackId(lastId);
+    if (okList.length) setMsg(okList.length === 1 ? `"${okList[0].title}" 변형 ${okList[0].count}개를 불러왔어요.` : `원형 ${okList.length}개를 불러왔어요: ${okList.map((o) => `${o.title} (변형 ${o.count}개)`).join(', ')}`);
+    if (bad.length) setError(`세브치크 파일이 아니에요: ${bad.join(', ')}`);
+    setBusy(false); if (file.current) file.current.value = '';
   }
+  const pos = pack ? (pack.fixedPos ?? (sixth && pack.altPos ? pack.altPos : null)) : null;
   async function open(num: number) {
     if (!pack) return;
     setError(null); setBusy(true);
     try {
       const id = await variantScore(pack.id, num);
-      // 6포지션으로: 첫 음에 "여기부터 6포지션" + 포지션 추천 켜기
+      // 높은 포지션: 첫 음에 "여기부터 N포지션" + 포지션 추천 켜기
       const s = await db.scores.get(id);
       const first = s ? parseMusicXML(s.xml).notes[0] : undefined;
-      if (first) await setSixth(id, sixth, `${first.measure}:${first.index}`);
-      if (sixth) try { localStorage.setItem('violin-pos-on', '1'); if (Number(localStorage.getItem('violin-pos-max') || 3) < 7) localStorage.setItem('violin-pos-max', '7'); } catch { /* 무시 */ }
+      const managed = [pack.fixedPos, pack.altPos].filter((x): x is number => !!x);
+      if (first && managed.length) await setStartPos(id, pos, `${first.measure}:${first.index}`, managed);
+      if (pos && pos > 1) try { localStorage.setItem('violin-pos-on', '1'); if (Number(localStorage.getItem('violin-pos-max') || 3) < 7) localStorage.setItem('violin-pos-max', '7'); } catch { /* 무시 */ }
       rememberVariant(pack.id, num);
       onOpen(id);
     } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
@@ -67,7 +73,7 @@ export default function Sevcik({ onOpen, onBack }: { onOpen: (scoreId: number) =
       )}
       {packs && packs.length > 1 && (
         <div className="chips">
-          {packs.map((p) => <button key={p.id} className={`chip ${pack?.id === p.id ? 'on' : ''}`} onClick={() => setPackId(p.id)}>{p.title}</button>)}
+          {packs.map((p) => <button key={p.id} className={`chip ${pack?.id === p.id ? 'on' : ''}`} onClick={() => setPackId(p.id)} title={p.subtitle} data-testid="sev-pack">{packLabel(p)}</button>)}
         </div>
       )}
 
@@ -96,7 +102,8 @@ export default function Sevcik({ onOpen, onBack }: { onOpen: (scoreId: number) =
               <>
                 <p className="small"><b>{cur.n}번</b>{cur.label ? ` · ${cur.label}` : ''}{cur.bpm ? ` · ♩=${cur.bpm}` : ''}{progress[cur.n] ? ` · 최고 ${progress[cur.n].best}% (${progress[cur.n].tries}번)` : ''}</p>
                 <Preview packId={pack.id} n={cur.n} k={cur.k} />
-                <label className="small"><input type="checkbox" checked={sixth} onChange={(e) => { setSixthS(e.target.checked); try { localStorage.setItem(SIXTH_KEY, e.target.checked ? '1' : '0'); } catch { /* 무시 */ } }} data-testid="sev-sixth" /> 6포지션으로 (포지션 추천이 6포지션 운지를 보여 줘요)</label>
+                {pack.fixedPos ? <p className="hint small">제{pack.fixedPos}포지션 연습이에요. 열면 포지션 추천이 {pack.fixedPos}포지션 운지를 보여 줘요.</p>
+                  : pack.altPos ? <label className="small"><input type="checkbox" checked={sixth} onChange={(e) => { setSixthS(e.target.checked); try { localStorage.setItem(SIXTH_KEY, e.target.checked ? '1' : '0'); } catch { /* 무시 */ } }} data-testid="sev-sixth" /> {pack.altPos}포지션으로 (포지션 추천이 {pack.altPos}포지션 운지를 보여 줘요)</label> : null}
                 <button className="primary wide" onClick={() => open(cur.n)} disabled={busy} data-testid="sev-open">이 변형으로 연습 (주제 전체에 적용)</button>
               </>
             ) : <p className="muted small">{n ? `${n}번 변형이 없어요.` : '번호를 고르세요.'}</p>}
@@ -122,8 +129,9 @@ export default function Sevcik({ onOpen, onBack }: { onOpen: (scoreId: number) =
       )}
 
       <div className="card">
-        <input ref={file} type="file" accept=".gz,.json,.sevcik,application/gzip,application/json" onChange={(e) => e.target.files?.[0] && load(e.target.files[0])} data-testid="sev-file" hidden />
+        <input ref={file} type="file" accept=".gz,.json,.sevcik,application/gzip,application/json" multiple onChange={(e) => e.target.files?.length && load(Array.from(e.target.files))} data-testid="sev-file" hidden />
         <button className="secondary wide" onClick={() => file.current?.click()} disabled={busy}>{pack ? '세브치크 파일 다시/더 불러오기' : '세브치크 파일 불러오기'}</button>
+        <p className="hint small">여러 파일(No.4~12)을 한꺼번에 골라도 돼요.</p>
         {msg && <p className="ok-text small" data-testid="sev-msg">{msg}</p>}
         {error && <p className="error">{error}</p>}
         {pack && <button className="mini danger" onClick={() => { if (confirm(`"${pack.title}" 파일을 이 기기에서 지울까요? 이미 연습한 변형 악보와 기록은 남아요.`)) void deletePack(pack.id); }}>이 원형 지우기</button>}

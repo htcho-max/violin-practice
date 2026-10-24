@@ -172,7 +172,7 @@ export interface ScoreMeta { id: number; createdAt: number; title: string; folde
 export const scoreListKey = (s: Partial<ScoreFile>): ScoreListKey => [s.createdAt ?? 0, s.title ?? '', s.folder ?? '', s.pieceId ?? '', s.exercise ? 1 : s.sevcik ? 2 : 0];
 export const metaFromKey = (id: number, k: ScoreListKey): ScoreMeta => ({ id, createdAt: k[0], title: k[1], folder: k[2] || undefined, pieceId: k[3] || undefined, exercise: k[4] === 1, ...(k[4] === 2 ? { sevcik: true } : {}) });
 /** 세브치크 팩 (책 내용이라 저장소에 없음 — 사용자가 파일로 불러옴) */
-export interface SevcikPack { id: string; title: string; subtitle?: string; note?: string; createdAt: number; variants: { n: number; label: string; k: number; bpm?: number | null }[] }
+export interface SevcikPack { id: string; title: string; subtitle?: string; note?: string; createdAt: number; /** 교재 번호 (차례) */ order?: number; /** 늘 이 포지션으로 (No.8 = 6 등) */ fixedPos?: number | null; /** 고르면 이 포지션으로도 (No.5 → 6) */ altPos?: number | null; variants: { n: number; label: string; k: number; bpm?: number | null }[] }
 /** 팩의 악보 하나 (주제 n=0, 변형 n) — id "팩id:n" */
 export interface SevcikXml { id: string; xml: string }
 export interface ExerciseMeta { stepId: string; spec: import('../exercise/curriculum').ExerciseSpec; seed: number; shiftKeys: string[]; tip?: string; tempo: number; progressId?: string }

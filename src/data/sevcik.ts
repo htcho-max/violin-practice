@@ -8,7 +8,7 @@ import { db, type ScoreFile, type SevcikPack } from './db';
 
 export const PACK_KIND = 'violin-sevcik-pack';
 export interface PackFile {
-  kind: string; version?: number; id: string; title: string; subtitle?: string; note?: string;
+  kind: string; version?: number; id: string; title: string; subtitle?: string; note?: string; order?: number; fixedPos?: number | null; altPos?: number | null;
   theme: string;
   variants: { n: number; label?: string; k?: number; bpm?: number | null; xml: string }[];
 }
@@ -36,7 +36,7 @@ export function parsePack(text: string): PackFile {
 export async function importPack(file: Blob): Promise<SevcikPack> {
   const p = parsePack(await readPackText(file));
   const meta: SevcikPack = {
-    id: p.id, title: p.title, subtitle: p.subtitle, note: p.note, createdAt: Date.now(),
+    id: p.id, title: p.title, subtitle: p.subtitle, note: p.note, createdAt: Date.now(), order: p.order, fixedPos: p.fixedPos ?? null, altPos: p.altPos ?? null,
     variants: p.variants.map((v) => ({ n: v.n, label: v.label ?? '', k: v.k ?? 1, bpm: v.bpm ?? null })).sort((a, b) => a.n - b.n),
   };
   const map = await scoreMap(p.id);
@@ -117,16 +117,22 @@ export async function packProgress(packId: string): Promise<Record<number, Varia
   return out;
 }
 
-/** 6포지션으로: 첫 음에 "여기부터 6포지션" 표시를 넣거나 뺌 (포지션 추천이 따름) */
-export async function setSixth(scoreId: number, on: boolean, firstKey: string) {
+/** 첫 음에 "여기부터 N포지션" 표시를 넣거나(pos) 뺌(null). managed: 앱이 넣었던 값 (이 값이면 지움) */
+export async function setStartPos(scoreId: number, pos: number | null, firstKey: string, managed: number[] = []) {
   const s = await db.scores.get(scoreId);
   if (!s) return;
   const marks = { ...(s.marks ?? {}) };
   const m = { ...(marks[firstKey] ?? {}) };
-  if (on) m.pos = 6; else if (m.pos === 6) delete m.pos;
+  if (m.pos !== undefined && managed.includes(m.pos)) delete m.pos;
+  if (pos) m.pos = pos;
   if (Object.keys(m).length) marks[firstKey] = m; else delete marks[firstKey];
   await db.scores.update(scoreId, { marks });
 }
+/** 6포지션으로 (No.5) */
+export const setSixth = (scoreId: number, on: boolean, firstKey: string) => setStartPos(scoreId, on ? 6 : null, firstKey, [6]);
+/** 원형 차례 (교재 번호 → 제목) */
+export const sortPacks = (ps: SevcikPack[]) => [...ps].sort((a, b) => (a.order ?? 999) - (b.order ?? 999) || a.title.localeCompare(b.title));
+export const packLabel = (p: SevcikPack) => (p.order ? `No.${p.order}` : p.title);
 
 const LAST = (pack: string) => `violin-sevcik-last:${pack}`;
 export function lastVariant(pack: string): number | null {

@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto';
 import { describe, it, expect } from 'vitest';
 import XML from '../scripts/test-score.musicxml?raw';
 import { db } from '../src/data/db';
-import { importPack, parsePack, readPackText, groupsOf, variantScore, scoreMap, packProgress, setSixth, PACK_KIND } from '../src/data/sevcik';
+import { importPack, parsePack, readPackText, groupsOf, variantScore, scoreMap, packProgress, setSixth, setStartPos, sortPacks, packLabel, PACK_KIND } from '../src/data/sevcik';
 
 // 책 내용이 아닌 시험용 팩 (시험 악보로)
 const pack = {
@@ -59,5 +59,20 @@ describe('세브치크 팩', () => {
     const id = await variantScore('test-pack', 1);
     await importPack(new Blob([JSON.stringify({ ...pack, variants: [{ ...pack.variants[0], xml: XML.replace('</score-partwise>', '<!-- v1b --></score-partwise>') }] })]));
     expect((await db.scores.get(id))?.xml).toContain('v1b');
+  });
+  it('포지션 표시: 앱이 넣은 값만 바꾸고, 원형은 번호 차례', async () => {
+    const id = await variantScore('test-pack', 1);
+    await setStartPos(id, 7, '1:0', [6, 7]);
+    expect((await db.scores.get(id))?.marks?.['1:0']?.pos).toBe(7);
+    await setStartPos(id, null, '1:0', [6, 7]);
+    expect((await db.scores.get(id))?.marks?.['1:0']).toBeUndefined();
+    await db.scores.update(id, { marks: { '1:0': { pos: 3 } } });
+    await setStartPos(id, null, '1:0', [6, 7]);
+    expect((await db.scores.get(id))?.marks?.['1:0']?.pos).toBe(3); // 내가 넣은 3포지션은 그대로
+    const ps = sortPacks([{ id: 'b', title: 'B', order: 10, createdAt: 0, variants: [] }, { id: 'a', title: 'A', order: 4, createdAt: 0, variants: [] }]);
+    expect(ps.map((p) => p.id)).toEqual(['a', 'b']);
+    expect(packLabel(ps[0])).toBe('No.4');
+    const m = await importPack(new Blob([JSON.stringify({ ...pack, id: 'p8', order: 8, fixedPos: 6 })]));
+    expect(m).toMatchObject({ order: 8, fixedPos: 6, altPos: null });
   });
 });

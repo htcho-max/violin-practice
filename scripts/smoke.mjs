@@ -1183,7 +1183,7 @@ try {
   {
     const { browser, page, errors } = await launch('a445.wav');
     const xml = fs.readFileSync(path.resolve('scripts/test-score.musicxml'), 'utf8');
-    const pk = { kind: 'violin-sevcik-pack', version: 1, id: 'smoke-pack', title: '시험 원형', theme: xml,
+    const pk = { kind: 'violin-sevcik-pack', version: 1, id: 'smoke-pack', title: '시험 원형', altPos: 6, theme: xml,
       variants: [{ n: 1, label: '온활', k: 1, bpm: 88, xml }, { n: 2, label: '온활', k: 2, bpm: 60, xml }, { n: 3, label: '반활', k: 1, xml }] };
     const pkPath = path.resolve('scripts/.smoke-sevcik.json');
     fs.writeFileSync(pkPath, JSON.stringify(pk));
@@ -1209,6 +1209,21 @@ try {
     await page.getByRole('button', { name: '◀ 목록' }).first().click();
     await page.waitForTimeout(800);
     ok(!(await page.locator('[data-testid=score-open]', { hasText: '변형' }).count()), '변형 악보는 내 악보 목록에 안 보임');
+    // 원형 여러 개 한꺼번에: No.8 처럼 늘 쓰는 포지션 → 안내 문구, 차례대로 칩
+    await page.getByTestId('open-sevcik').click().catch(() => {});
+    await page.waitForTimeout(500);
+    const pk2 = path.resolve('scripts/.smoke-sevcik2.json'), pk3 = path.resolve('scripts/.smoke-sevcik3.json');
+    fs.writeFileSync(pk2, JSON.stringify({ ...pk, id: 'smoke-8', title: '시험 No.8', order: 8, fixedPos: 6 }));
+    fs.writeFileSync(pk3, JSON.stringify({ ...pk, id: 'smoke-4', title: '시험 No.4', order: 4 }));
+    await page.getByTestId('sev-file').setInputFiles([pk2, pk3]);
+    await page.waitForTimeout(1200);
+    ok(/원형 2개/.test(await page.getByTestId('sev-msg').textContent().catch(() => '')), '여러 원형 한꺼번에 불러오기');
+    const chips = await page.getByTestId('sev-pack').allTextContents();
+    ok(chips[0] === 'No.4' && chips[1] === 'No.8', `원형 칩 차례 ${chips.join(',')}`);
+    await page.getByTestId('sev-pack').filter({ hasText: 'No.8' }).click();
+    await page.waitForTimeout(300);
+    ok(/제6포지션 연습/.test(await page.locator('section.sevcik').textContent()), '늘 쓰는 포지션 안내');
+    fs.unlinkSync(pk2); fs.unlinkSync(pk3);
     fs.unlinkSync(pkPath);
     ok(errors.length === 0, `콘솔 오류 없음 ${errors.join(' | ')}`);
     await browser.close();
