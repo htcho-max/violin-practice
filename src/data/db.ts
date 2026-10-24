@@ -162,13 +162,19 @@ export interface ScoreFile {
   origXml?: string;
   /** 목록용 가벼운 열쇠 (자동으로 채움): 악보 XML 을 읽지 않고 목록을 그리려고 인덱스에 넣음 */
   listKey?: ScoreListKey;
+  /** 세브치크 변형 악보 (세브치크 화면에서 만듦, 내 악보 목록에는 안 보임) */
+  sevcik?: { pack: string; n: number };
 }
-/** [만든 시각, 제목, 폴더, 곡 id, 연습곡이면 1] */
+/** [만든 시각, 제목, 폴더, 곡 id, 연습곡이면 1 · 세브치크면 2] */
 export type ScoreListKey = [number, string, string, string, number];
 /** 목록에 쓰는 악보 정보 (XML 없이) */
-export interface ScoreMeta { id: number; createdAt: number; title: string; folder?: string; pieceId?: string; exercise: boolean }
-export const scoreListKey = (s: Partial<ScoreFile>): ScoreListKey => [s.createdAt ?? 0, s.title ?? '', s.folder ?? '', s.pieceId ?? '', s.exercise ? 1 : 0];
-export const metaFromKey = (id: number, k: ScoreListKey): ScoreMeta => ({ id, createdAt: k[0], title: k[1], folder: k[2] || undefined, pieceId: k[3] || undefined, exercise: k[4] === 1 });
+export interface ScoreMeta { id: number; createdAt: number; title: string; folder?: string; pieceId?: string; exercise: boolean; sevcik?: boolean }
+export const scoreListKey = (s: Partial<ScoreFile>): ScoreListKey => [s.createdAt ?? 0, s.title ?? '', s.folder ?? '', s.pieceId ?? '', s.exercise ? 1 : s.sevcik ? 2 : 0];
+export const metaFromKey = (id: number, k: ScoreListKey): ScoreMeta => ({ id, createdAt: k[0], title: k[1], folder: k[2] || undefined, pieceId: k[3] || undefined, exercise: k[4] === 1, ...(k[4] === 2 ? { sevcik: true } : {}) });
+/** 세브치크 팩 (책 내용이라 저장소에 없음 — 사용자가 파일로 불러옴) */
+export interface SevcikPack { id: string; title: string; subtitle?: string; note?: string; createdAt: number; variants: { n: number; label: string; k: number; bpm?: number | null }[] }
+/** 팩의 악보 하나 (주제 n=0, 변형 n) — id "팩id:n" */
+export interface SevcikXml { id: string; xml: string }
 export interface ExerciseMeta { stepId: string; spec: import('../exercise/curriculum').ExerciseSpec; seed: number; shiftKeys: string[]; tip?: string; tempo: number; progressId?: string }
 export interface ExerciseProgress { best: number; mean: number | null; passed: boolean; at: number; bpm?: number; tries: number }
 
@@ -183,6 +189,8 @@ class PracticeDB extends Dexie {
   lessonNotes!: Table<LessonNote, number>;
   reviews!: Table<ReviewItem, string>;
   echoRuns!: Table<EchoRun, number>;
+  sevcikPacks!: Table<SevcikPack, string>;
+  sevcikXml!: Table<SevcikXml, string>;
   constructor() {
     super('violin-practice');
     this.version(1).stores({
@@ -206,6 +214,8 @@ class PracticeDB extends Dexie {
     this.version(8).stores({ reviews: 'id, due, scoreId' });
     // 따라 하기 기록
     this.version(9).stores({ echoRuns: '++id, date, createdAt' });
+    // 세브치크 팩 (원형 + 변형)
+    this.version(10).stores({ sevcikPacks: 'id', sevcikXml: 'id' });
     // 악보를 넣거나 고칠 때 listKey 를 늘 맞춰 둠 (가져오기·백업 되돌리기·폴더 옮기기 모두)
     this.scores.hook('creating', (_pk, obj) => { obj.listKey = scoreListKey(obj); });
     this.scores.hook('updating', (mods, _pk, obj) => {

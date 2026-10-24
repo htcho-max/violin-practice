@@ -21,6 +21,8 @@ import { recommend, posLabel, type Fingering } from '../score/fingering';
 import { FullscreenButton } from '../components/FullscreenButton';
 import { transposeXml, firstKey, keyName, newFifths, semisLabel, transposedTitle, transposedCopy } from '../score/transpose';
 import { ScoreFollower, followScrollDelta } from '../score/follow';
+import Sevcik from './Sevcik';
+import { variantScore, rememberVariant } from '../data/sevcik';
 type LagMode = 'off' | 'mark' | 'wait';
 import { freqToMidiFloat } from '../audio/notes';
 import { tolFor, toneOf, TOLERANCES, type Tolerance, type ToleranceId } from '../score/tolerance';
@@ -89,6 +91,7 @@ export function Score() {
   const folders = useFolders();
   const [openId, setOpenId] = useState<number | null>(null);
   const [exView, setExView] = useState(false);
+  const [sevView, setSevView] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [importMsg, setImportMsg] = useState<string | null>(null);
   const [pieceForNew, setPieceForNew] = useState('');
@@ -138,7 +141,7 @@ export function Score() {
       for (const f of list) {
         try { ok.push(await readScoreFile(f, false)); } catch (e) { bad.push(`${f.name} (${(e as Error).message || '읽지 못함'})`); }
       }
-      const existing = new Map(scores.filter((m) => !m.exercise).map((m) => [m.title, m.id]));
+      const existing = new Map(scores.filter((m) => !m.exercise && !m.sevcik).map((m) => [m.title, m.id]));
       const dup = ok.filter((r) => existing.has(r.title));
       let replace = false;
       if (dup.length) replace = confirm(`이미 있는 악보 ${dup.length}개가 있어요 (${dup.slice(0, 3).map((d) => d.title).join(', ')}${dup.length > 3 ? ' …' : ''}).\n\n확인: 새 파일로 바꾸기 (연습 기록·내 표시는 그대로)\n취소: 따로 하나 더 넣기`);
@@ -162,14 +165,16 @@ export function Score() {
 
   // 연습곡 화면 층이 먼저 (악보가 그 위에)
   useBackLayer(exView, () => setExView(false));
+  useBackLayer(sevView, () => setSevView(false));
   // openId 로 (조 옮겨 저장한 악보로 바로 바꿀 때 불러오는 동안 층이 닫혔다 열리지 않게)
-  useBackLayer(openId !== null, () => { const o = open; setOpenId(null); setOpenNote(null); setExView(!!o?.exercise); });
+  useBackLayer(openId !== null, () => { const o = open; setOpenId(null); setOpenNote(null); setExView(!!o?.exercise); setSevView(!!o?.sevcik); });
   if (openId !== null && openFile === undefined) return <section className="page score"><p className="muted">악보를 여는 중…</p></section>;
   if (open) return <ScoreView key={`${open.id}:${open.createdAt}`} score={open} initial={openReq && openReq.scoreId === open.id ? openReq : undefined} notice={openNote && openNote.id === open.id ? openNote.text : undefined}
     onOpenOther={(id, text) => { setOpenReq(null); setOpenNote(text ? { id, text } : null); setOpenId(id); }}
-    onClose={() => { setOpenId(null); setOpenReq(null); setOpenNote(null); setExView(!!open.exercise); }} />;
+    onClose={() => { setOpenId(null); setOpenReq(null); setOpenNote(null); setExView(!!open.exercise); setSevView(!!open.sevcik); }} />;
   if (exView) return <Exercises onOpen={(id) => { setOpenId(id); }} onBack={() => setExView(false)} />;
-  const mine = scores.filter((s) => !s.exercise);
+  if (sevView) return <Sevcik onOpen={(id) => { setOpenId(id); }} onBack={() => setSevView(false)} />;
+  const mine = scores.filter((s) => !s.exercise && !s.sevcik);
   const known = new Set(folders.map((f) => f.id));
   const inFolder = (id: string | 'none') => mine.filter((s) => (id === 'none' ? !s.folder || !known.has(s.folder) : s.folder === id));
   const unsorted = inFolder('none');
@@ -189,6 +194,12 @@ export function Score() {
         <b>음계 · 포지션 · 에튀드</b>
         <p className="hint">1포지션 음계에서 3포지션, 포지션 이동, 에튀드, 세브치크식 활 연습까지 앱이 연습곡을 만들어 줘요.</p>
         <button className="primary wide" onClick={() => setExView(true)} data-testid="open-exercises">연습곡 만들기</button>
+      </div>
+
+      <div className="card">
+        <b>세브치크</b>
+        <p className="hint">원형 악보를 고르고 변형 번호를 골라 연습해요. 변형은 주제 전체에 적용된 악보로 열려요.</p>
+        <button className="secondary wide" onClick={() => setSevView(true)} data-testid="open-sevcik">세브치크 열기</button>
       </div>
 
       <div className="card">
@@ -1194,6 +1205,7 @@ function ScoreView({ score, onClose, initial, notice, onOpenOther }: {
         <button className="mini" onClick={() => { if (listening) stop(); pitch.stop(); onClose(); }}>◀ 목록</button>
         <b className="score-title">{score.title}</b>
       </div>
+      {score.sevcik && <SevcikBar sev={score.sevcik} onOpen={(id) => { if (listening) stop(); pitch.stop(); onOpenOther?.(id); }} onList={() => { if (listening) stop(); pitch.stop(); onClose(); }} />}
 
       {!ex && <LessonChecklist scoreId={score.id!} onMeasure={(m) => setRange(m, m + (lenLock ?? span) - 1)} />}
 
@@ -1845,3 +1857,25 @@ export function RunInsightView({ run }: { run: ScoreRun }) {
   );
 }
 
+
+/** 세브치크 변형 악보 위: 이전·다음 변형, 변형 목록 */
+function SevcikBar({ sev, onOpen, onList }: { sev: { pack: string; n: number }; onOpen: (id: number) => void; onList: () => void }) {
+  const [nums, setNums] = useState<number[]>([]);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { db.sevcikPacks.get(sev.pack).then((p) => setNums(p ? [0, ...p.variants.map((v) => v.n)] : [])).catch(() => {}); }, [sev.pack]);
+  const i = nums.indexOf(sev.n);
+  async function go(d: number) {
+    const t = nums[i + d];
+    if (t === undefined) return;
+    setBusy(true);
+    try { const id = await variantScore(sev.pack, t); rememberVariant(sev.pack, t); onOpen(id); } catch { /* 팩이 없으면 그대로 */ } finally { setBusy(false); }
+  }
+  if (!nums.length) return null;
+  return (
+    <div className="sev-bar" data-testid="sev-bar">
+      <button className="mini" onClick={() => go(-1)} disabled={busy || i <= 0} data-testid="sev-prev">◀ {i > 0 ? (nums[i - 1] === 0 ? '주제' : `${nums[i - 1]}번`) : ''}</button>
+      <button className="mini" onClick={onList}>변형 목록</button>
+      <button className="mini" onClick={() => go(1)} disabled={busy || i < 0 || i >= nums.length - 1} data-testid="sev-next">{i < nums.length - 1 ? `${nums[i + 1]}번` : ''} ▶</button>
+    </div>
+  );
+}

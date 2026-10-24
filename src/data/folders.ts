@@ -40,7 +40,7 @@ export function ensureFolders(): Promise<void> {
       pieces.forEach((p) => titles.set(p.book, [...(titles.get(p.book) ?? []), p.title]));
       const scores = await db.scores.toArray();
       for (const s of scores) {
-        if (s.exercise || s.folder) continue;
+        if (s.exercise || s.sevcik || s.folder) continue;
         const f = guessFolder(s.title, s.pieceId ? byId.get(s.pieceId)?.book : undefined, titles);
         if (!folders.some((x) => x.id === f)) folders.push({ id: f, name: `스즈키 ${f.split('-')[1]}권` });
         await db.scores.update(s.id!, { folder: f });

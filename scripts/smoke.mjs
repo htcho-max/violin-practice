@@ -2,6 +2,7 @@
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
+import fs from 'node:fs';
 
 const server = spawn('npx', ['vite', 'preview', '--port', '4319', '--strictPort'], { stdio: 'ignore', detached: true });
 await new Promise((r) => setTimeout(r, 2500));
@@ -1175,6 +1176,40 @@ try {
     ok(await page.evaluate(() => localStorage.getItem('violin-lag-mode')) === 'wait', '늦어지면 설정 저장');
     await page.getByTestId('score-metro-off').click();
     ok(!(await page.getByTestId('lag-mark').isVisible().catch(() => false)), '박자 끄면 "늦어지면" 숨김');
+    ok(errors.length === 0, `콘솔 오류 없음 ${errors.join(' | ')}`);
+    await browser.close();
+  }
+  // ── 세브치크: 팩 불러오기 → 변형 고르기·미리 보기 → 악보로 → 다음 변형 → 목록에는 안 보임 ──
+  {
+    const { browser, page, errors } = await launch('a445.wav');
+    const xml = fs.readFileSync(path.resolve('scripts/test-score.musicxml'), 'utf8');
+    const pk = { kind: 'violin-sevcik-pack', version: 1, id: 'smoke-pack', title: '시험 원형', theme: xml,
+      variants: [{ n: 1, label: '온활', k: 1, bpm: 88, xml }, { n: 2, label: '온활', k: 2, bpm: 60, xml }, { n: 3, label: '반활', k: 1, xml }] };
+    const pkPath = path.resolve('scripts/.smoke-sevcik.json');
+    fs.writeFileSync(pkPath, JSON.stringify(pk));
+    await tab(page, '악보');
+    await page.getByTestId('open-sevcik').click();
+    await page.getByTestId('sev-file').setInputFiles(pkPath);
+    ok(await seen(page.getByTestId('sev-msg')), `세브치크 파일 불러오기 (${await page.getByTestId('sev-msg').textContent().catch(() => '')})`);
+    ok((await page.getByTestId('sev-cell').count()) === 3, '변형 번호 칸 3개');
+    await page.waitForTimeout(2500);
+    ok((await page.locator('[data-testid=sev-preview] svg').count()) > 0, '본보기 미리 보기');
+    await page.getByTestId('sev-sixth').check();
+    await page.getByTestId('sev-open').click();
+    await page.waitForTimeout(2000);
+    ok(/변형 1 \(온활\)/.test(await page.locator('.score-title').first().textContent()), '변형 악보 열림');
+    ok(await seen(page.getByTestId('sev-bar')), '이전·다음 변형 막대');
+    ok(/on/.test(await page.getByTestId('pos-toggle').getAttribute('class') ?? ''), '6포지션으로: 포지션 추천 켜짐');
+    await page.getByTestId('sev-next').click();
+    await page.waitForTimeout(2000);
+    ok(/변형 2/.test(await page.locator('.score-title').first().textContent()), '다음 변형으로');
+    await page.getByRole('button', { name: '변형 목록' }).click();
+    await page.waitForTimeout(800);
+    ok((await page.getByTestId('sev-num').inputValue()) === '2', '마지막 변형 기억');
+    await page.getByRole('button', { name: '◀ 목록' }).first().click();
+    await page.waitForTimeout(800);
+    ok(!(await page.locator('[data-testid=score-open]', { hasText: '변형' }).count()), '변형 악보는 내 악보 목록에 안 보임');
+    fs.unlinkSync(pkPath);
     ok(errors.length === 0, `콘솔 오류 없음 ${errors.join(' | ')}`);
     await browser.close();
   }

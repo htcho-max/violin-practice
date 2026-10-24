@@ -140,7 +140,7 @@ describe('따라 하기 DB (v9)', () => {
 
     const { db } = await import('../src/data/db');
     await db.open();
-    expect(db.verno).toBe(9);
+    expect(db.verno).toBeGreaterThanOrEqual(9);
     expect(await db.sessions.count()).toBe(1);
     expect(await db.reviews.count()).toBe(1);
     await db.echoRuns.add({ createdAt: 1, date: '2026-10-21', key: 'G', level: 'three', notes: [55, 57, 59], hits: 3, expected: 3, meanAbs: 6 });
