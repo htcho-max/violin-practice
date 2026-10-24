@@ -21,6 +21,7 @@ import { recommend, posLabel, type Fingering } from '../score/fingering';
 import { FullscreenButton } from '../components/FullscreenButton';
 import { transposeXml, firstKey, keyName, newFifths, semisLabel, transposedTitle, transposedCopy } from '../score/transpose';
 import { ScoreFollower, followScrollDelta } from '../score/follow';
+type LagMode = 'off' | 'mark' | 'wait';
 import { freqToMidiFloat } from '../audio/notes';
 import { tolFor, toneOf, TOLERANCES, type Tolerance, type ToleranceId } from '../score/tolerance';
 import { centsText } from '../components/CentsGauge';
@@ -353,6 +354,9 @@ function ScoreView({ score, onClose, initial, notice, onOpenOther }: {
   const [scoreMetro, setScoreMetroS] = useState<'off' | 'visual' | 'sound'>(() => { try { const v = localStorage.getItem('score-metro'); return v === 'visual' || v === 'sound' ? v : 'off'; } catch { return 'off'; } });
   const setScoreMetro = (v: 'off' | 'visual' | 'sound') => { setScoreMetroS(v); try { localStorage.setItem('score-metro', v); } catch { /* 무시 */ } };
   const [livePitch, setLivePitchS] = useState<boolean>(() => { try { return localStorage.getItem('score-live-pitch') !== '0'; } catch { return true; } });
+  // 박자(메트로놈·반주)에 맞춰 칠 때 늦어지면: off 그대로 / mark 내 위치 표시 / wait 기다려 주기
+  const [lagMode, setLagModeS] = useState<LagMode>(() => { try { const v = localStorage.getItem('violin-lag-mode'); return v === 'off' || v === 'wait' ? v : 'mark'; } catch { return 'mark'; } });
+  const setLagMode = (v: LagMode) => { setLagModeS(v); try { localStorage.setItem('violin-lag-mode', v); } catch { /* 무시 */ } };
   const [scoreFollow, setScoreFollowS] = useState(() => { try { return localStorage.getItem('score-follow') !== '0'; } catch { return true; } });
   const setScoreFollow = (v: boolean) => { setScoreFollowS(v); try { localStorage.setItem('score-follow', v ? '1' : '0'); } catch { /* 무시 */ } };
   const setLivePitch = (v: boolean) => { setLivePitchS(v); try { localStorage.setItem('score-live-pitch', v ? '1' : '0'); } catch { /* 무시 */ } };
@@ -784,6 +788,35 @@ function ScoreView({ score, onClose, initial, notice, onOpenOther }: {
   const listenCtx = useRef<{ expected: typeof expected; from: number; to: number; inSession: boolean } | null>(null);
   const followRef = useRef<ScoreFollower | null>(null);
   const followShown = useRef(-1);
+  /** 박자에 맞춰 치는 중(메트로놈·반주)인지, 그때 늦어지면 어떻게 할지 */
+  const timedRef = useRef<{ lag: LagMode; opts: { keepListening: true; muteMine: true; acc: boolean; click: boolean | 'visual' } } | null>(null);
+  /** 기다려 주기: 기다리는 악보 음 순번 (null = 안 기다림), 한 번이라도 기다렸는지(박자 분석 빼기) */
+  const waitIdx = useRef<number | null>(null);
+  const waited = useRef(false);
+  const [waiting, setWaiting] = useState(false);
+  /** 지금 재생 계획 (악보 음 key → 시각·길이, 전체 계획에서의 순번) */
+  const planInfo = useRef<{ time: Map<string, number>; dur: Map<string, number>; fullIdx: Map<string, number> }>({ time: new Map(), dur: new Map(), fullIdx: new Map() });
+  const meLit = useRef<Element[]>([]);
+  function markMe(key: string | null) {
+    meLit.current.forEach((g) => g.classList.remove('me-note'));
+    const ids = key ? els.current.get(key) ?? [] : [];
+    meLit.current = ids.map((id) => document.getElementById(id) ?? document.getElementById(`vf-${id}`)).filter((x): x is HTMLElement => !!x);
+    meLit.current.forEach((g) => g.classList.add('me-note'));
+    if (meLit.current[0]) followScroll(meLit.current[0]);
+  }
+  const keyOf = (e: { measure: number; index: number }) => `${e.measure}:${e.index}`;
+  /** 기다리던 음을 치기 시작하면: 그 음 길이만큼 뒤에 다음 음부터 박을 이어서 */
+  function resumeFromWait(idx: number) {
+    const t = timedRef.current, exp = listenCtx.current?.expected;
+    if (!t || !exp) return;
+    waitIdx.current = null; setWaiting(false);
+    const nextE = exp[idx + 1];
+    if (!nextE) return; // 마지막 음이면 박은 끝
+    const at = planInfo.current.fullIdx.get(keyOf(nextE));
+    if (at === undefined) return;
+    const d = planInfo.current.dur.get(keyOf(exp[idx])) ?? 0.5;
+    setTimeout(() => { if (listeningRef.current && waitIdx.current === null) void playRangeRef.current(at, t.opts); }, Math.max(0, d * 1000 - 180));
+  }
 
   useEffect(() => {
     if (!listening) return;
@@ -795,14 +828,19 @@ function ScoreView({ score, onClose, initial, notice, onOpenOther }: {
       const n = seg.push(r.time, r.freq);
       if (n) { played.current.push({ midi: n.midi, cents: n.settledCents ?? n.meanCents, start: n.start, db: meanDb(dbTrack.current, n.start + 0.05, n.end) }); tick((x) => x + 1); }
       // 메트로놈·반주 없이 채점할 때: 연주를 듣고 악보 따라가기
+      // 박에 맞춰 칠 때는 '내 위치'를 따로 표시 (늦어지면 기다려 주기)
       const f = followRef.current;
-      if (f && !playingRef.current) {
-        if (n) f.onNote(n.midi);
-        const idx = f.onLive(r.freq === null ? null : Math.round(freqToMidiFloat(r.freq, settings.a4)));
+      const timed = timedRef.current;
+      if (f && (timed || !playingRef.current)) {
+        if (n) f.onNote(n.midi + (n.settledCents ?? n.meanCents ?? 0) / 100);
+        const idx = f.onLive(r.freq === null ? null : freqToMidiFloat(r.freq, settings.a4));
         if (idx !== followShown.current && idx >= 0) {
           followShown.current = idx;
           const e = listenCtx.current?.expected[idx];
-          if (e) { highlight(`${e.measure}:${e.index}`); setNowMeasure(e.measure); }
+          if (e && timed) {
+            markMe(keyOf(e));
+            if (waitIdx.current !== null && idx >= waitIdx.current) resumeFromWait(idx);
+          } else if (e) { highlight(keyOf(e)); setNowMeasure(e.measure); }
         }
       }
     });
@@ -871,6 +909,12 @@ function ScoreView({ score, onClose, initial, notice, onOpenOther }: {
     const full = planPlayback(playParsed, { bpm: playBpm, from, to, countIn: o.keepListening ? true : resumeAt === undefined && countIn, order: o.keepListening ? undefined : order }, hasAcc && (o.keepListening ? o.acc : accOn) ? accParts : []);
     const plan = resumeAt === undefined ? full : slicePlan(full, resumeAt);
     const base = resumeAt ?? 0;
+    if (o.keepListening) {
+      const pi = { time: new Map<string, number>(), dur: new Map<string, number>(), fullIdx: new Map<string, number>() };
+      full.events.forEach((e, i) => { const k = keyOf(e.note); if (!pi.fullIdx.has(k)) pi.fullIdx.set(k, i); pi.dur.set(k, e.dur); });
+      plan.events.forEach((e) => { const k = keyOf(e.note); if (!pi.time.has(k)) pi.time.set(k, e.time); });
+      planInfo.current = pi;
+    }
     setPausedAt(null);
     setPlaying(true);
     await scorePlayer.play(plan, {
@@ -882,8 +926,22 @@ function ScoreView({ score, onClose, initial, notice, onOpenOther }: {
       mute: o.muteMine ?? (hasAcc && mute),
       onNote: (e, idx) => {
         if (e) curIdx.current = base + (idx ?? plan.events.indexOf(e));
-        highlight(e ? `${e.note.measure}:${e.note.index}` : null);
+        const t = o.keepListening ? timedRef.current : null;
+        const lagOn = !!t && t.lag !== 'off' && !!followRef.current;
+        highlight(e ? keyOf(e.note) : null, !lagOn);
         setNowMeasure(e ? e.note.measure : null);
+        // 기다려 주기: 박이 내 다음 음보다 한 박(최소 0.6초) 넘게 앞서 가면 멈추고 그 음을 기다림
+        if (e && lagOn && t!.lag === 'wait' && waitIdx.current === null) {
+          const exp = listenCtx.current?.expected ?? [];
+          const myNext = Math.max(0, followRef.current!.pos + 1);
+          const ne = exp[myNext];
+          const tm = ne ? planInfo.current.time.get(keyOf(ne)) : undefined;
+          if (ne && tm !== undefined && e.time - tm >= Math.max(60 / playBpm, 0.6)) {
+            waitIdx.current = myNext; waited.current = true;
+            scorePlayer.stop(); setPlaying(false);
+            highlight(keyOf(ne), false); setNowMeasure(ne.measure); setWaiting(true);
+          }
+        }
       },
       onEnd: () => {
         if (o.keepListening) {
@@ -929,9 +987,18 @@ function ScoreView({ score, onClose, initial, notice, onOpenOther }: {
     if (!pitchTracker.running) return; // 마이크를 못 열면 시작하지 않음 (오류 문구는 pitch.error)
     runStart.current = Date.now();
     listenCtx.current = { expected, from, to, inSession: !!session && session.runningSince !== null };
-    followRef.current = scoreFollow ? new ScoreFollower(expected.map((e) => e.midi)) : null;
+    const withAcc0 = hasAcc && scoreWithAcc;
+    const metro0 = scoreMetro !== 'off' ? scoreMetro : drillRef.current && drillRef.current.from === from && drillRef.current.to === to ? 'visual' : 'off';
+    const timed = withAcc0 || metro0 !== 'off';
+    timedRef.current = timed ? { lag: lagMode, opts: { keepListening: true, muteMine: true, acc: withAcc0, click: metro0 === 'sound' ? true : metro0 === 'visual' ? 'visual' : false } } : null;
+    waitIdx.current = null; waited.current = false; setWaiting(false);
+    const follow = timed ? lagMode !== 'off' : scoreFollow;
+    followRef.current = follow ? new ScoreFollower(expected.map((e) => e.midi)) : null;
     followShown.current = -1; lastRow.current = -1;
-    if (scoreFollow && expected[0]) { highlight(`${expected[0].measure}:${expected[0].index}`); setNowMeasure(expected[0].measure); }
+    if (follow && expected[0]) {
+      if (timed) markMe(keyOf(expected[0]));
+      else { highlight(keyOf(expected[0])); setNowMeasure(expected[0].measure); }
+    }
     if (recOn) { try { await recorder.start(settings.a4); } catch { /* 녹음 못 해도 채점은 계속 */ } }
     listeningRef.current = true;
     setListening(true);
@@ -952,7 +1019,9 @@ function ScoreView({ score, onClose, initial, notice, onOpenOther }: {
     const last_ = segRef.current?.flush();
     if (last_) played.current.push({ midi: last_.midi, cents: last_.settledCents ?? last_.meanCents, start: last_.start, db: meanDb(dbTrack.current, last_.start + 0.05, last_.end) });
     segRef.current = null;
-    if (followRef.current) { followRef.current = null; highlight(null); setNowMeasure(null); }
+    if (followRef.current) { followRef.current = null; highlight(null); markMe(null); setNowMeasure(null); }
+    const hadWait = waited.current;
+    timedRef.current = null; waitIdx.current = null; setWaiting(false);
     setListening(false);
     const ctx = listenCtx.current ?? { expected, from, to, inSession: !!session };
     listenCtx.current = null;
@@ -994,7 +1063,8 @@ function ScoreView({ score, onClose, initial, notice, onOpenOther }: {
       const rec = await recP;
       const played_ = r.filter((x) => x.status !== 'missed').length;
       if (played_ < 2 || durationSec < 2) return;
-      const rh = analyzeRhythm(parsed, r);
+      // 기다려 주기로 멈춘 적이 있으면 박자 분석은 빼요 (멈춘 시간이 섞여서)
+      const rh = hadWait ? null : analyzeRhythm(parsed, r);
       const weak = [...sm.byMeasure.entries()].filter(([, v]) => v !== null).sort((a, b) => b[1]! - a[1]!).slice(0, 3).map(([m]) => m);
       const run: ScoreRun = {
         createdAt: Date.now(), date: localDate(), scoreId: score.id!, title: score.title, pieceId: score.pieceId, exerciseId: ex?.stepId,
@@ -1256,6 +1326,7 @@ function ScoreView({ score, onClose, initial, notice, onOpenOther }: {
         ) : (
           <>
             <div className="rec-live"><span className="rec-dot" /> {recorder.recording ? '녹음 · ' : ''}듣는 중 · {liveDone}/{expected.length}음</div>
+            {waiting && <p className="wait-msg" data-testid="wait-msg">⏸ 기다리는 중 — 빨간 음부터 치면 박이 다시 이어져요</p>}
             {livePitch && <div className="live-pitch-row"><span className="muted small">지금 내는 음</span> <LivePitch a4={settings.a4} tol={tol} /></div>}
             <div className="progress"><div style={{ width: `${(liveDone / Math.max(1, expected.length)) * 100}%` }} /></div>
             <button className="primary wide big stop" onClick={stop} data-testid="score-stop">■ 끝내고 채점</button>
@@ -1288,6 +1359,17 @@ function ScoreView({ score, onClose, initial, notice, onOpenOther }: {
         )}
         {!listening && (
           <label className="small"><input type="checkbox" checked={livePitch} onChange={(e) => setLivePitch(e.target.checked)} data-testid="score-live-pitch" /> 연주하는 동안 지금 내는 음 보기 (튜너보다 천천히 움직여요)</label>
+        )}
+        {!listening && (scoreMetro !== 'off' || (hasAcc && scoreWithAcc)) && (
+          <div className="metro-pick" role="group" aria-label="늦어지면">
+            <span className="small">늦어지면</span>
+            {([['off', '그대로'], ['mark', '내 위치 표시'], ['wait', '기다려 주기']] as const).map(([v, l]) => (
+              <button key={v} type="button" className={`chip ${lagMode === v ? 'on' : ''}`} onClick={() => setLagMode(v)} data-testid={`lag-${v}`}>{l}</button>
+            ))}
+          </div>
+        )}
+        {!listening && (scoreMetro !== 'off' || (hasAcc && scoreWithAcc)) && lagMode !== 'off' && (
+          <p className="hint small">{lagMode === 'mark' ? '빨간 음은 박 위치, 주황 테두리 음은 내가 치고 있는 위치예요. 악보는 내 위치를 따라 넘어가요.' : '내가 한 박 넘게 늦어지면 박이 멈추고 빨간 음을 기다려요. 그 음을 치면 거기서부터 박이 다시 이어져요. (기다린 판은 박자 분석을 빼요)'}</p>
         )}
         {!listening && scoreMetro !== 'off' && (
           <p className="hint small">재생 템포 ♩{playBpm}로 한 마디 세고 시작해요. 악보에 지금 칠 음도 따라 표시돼요.{scoreMetro === 'sound' ? ' 이어폰(유선 권장)으로 들으면 녹음에 클릭이 안 들어가요. 스피커로 들어도 채점은 클릭 소리를 빼고 해요.' : ' 소리 없이 아래 점이 박마다 깜빡여요.'}</p>
@@ -1579,7 +1661,7 @@ function ScoreView({ score, onClose, initial, notice, onOpenOther }: {
             <>
               {playing && <span ref={beatDot} className="beat-dot" data-testid="beat-dot" aria-hidden />}
               {livePitch && <LivePitch a4={settings.a4} tol={tol} compact />}
-              <span className="float-info"><span className="rec-dot" /> {liveDone}/{expected.length}음</span>
+              <span className="float-info"><span className="rec-dot" /> {waiting ? '⏸ 기다리는 중' : `${liveDone}/${expected.length}음`}</span>
               <button className="primary" onClick={stop} data-testid="float-stop-score">■ 끝내고 채점</button>
             </>
           ) : !playing && pausedAt === null ? (

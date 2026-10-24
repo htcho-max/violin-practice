@@ -1153,6 +1153,31 @@ try {
     ok(errors.length === 0, `콘솔 오류 없음 ${errors.join(' | ')}`);
     await browser.close();
   }
+  // ── 박에 맞춰 칠 때 늦어지면: 내 위치 표시 / 기다려 주기 (a445: A4 만 계속 → 첫 음 뒤로 못 따라감) ──
+  {
+    const { browser, page, errors } = await launch('a445.wav');
+    await tab(page, '악보');
+    await page.getByTestId('score-file').setInputFiles(path.resolve('scripts/test-score.musicxml'));
+    await page.waitForTimeout(1500);
+    await page.getByTestId('play-bpm').fill('120');
+    await page.getByTestId('score-metro-visual').click();
+    ok(await seen(page.getByTestId('lag-mark')), '박자 켜면 "늦어지면" 고르기');
+    await page.getByTestId('lag-wait').click();
+    await page.getByTestId('score-start').click();
+    await page.waitForTimeout(6500); // 한 마디 세기(2초) + 몇 박
+    ok(await seen(page.getByTestId('wait-msg')), '기다려 주기: 늦어지면 멈추고 기다림');
+    const me = await page.locator('[data-testid=osmd] .me-note').count();
+    ok(me > 0, `내 위치 표시 (${me})`);
+    const now = await page.locator('[data-testid=osmd] .now-note').count();
+    ok(now > 0, `기다리는 음 표시 (${now})`);
+    await page.getByTestId('score-stop').click();
+    await page.waitForTimeout(800);
+    ok(await page.evaluate(() => localStorage.getItem('violin-lag-mode')) === 'wait', '늦어지면 설정 저장');
+    await page.getByTestId('score-metro-off').click();
+    ok(!(await page.getByTestId('lag-mark').isVisible().catch(() => false)), '박자 끄면 "늦어지면" 숨김');
+    ok(errors.length === 0, `콘솔 오류 없음 ${errors.join(' | ')}`);
+    await browser.close();
+  }
 } catch (e) {
   console.log('FAIL 예외', e.message.split('\n')[0]);
   process.exitCode = 1;

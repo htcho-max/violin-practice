@@ -1,75 +1,100 @@
 /**
- * 악보 따라가기 (메트로놈 없이): 연주한 음을 악보 음과 맞춰 지금 위치를 짐작한다.
- * - 확정된 음(onNote)으로 위치를 옮기고, 지금 울리는 음(live)으로 다음 음을 미리 보여 준다.
- * - 몇 음 건너뛰거나 틀려도 따라가고, 다른 곳에서 다시 시작하면 (연속 3음 일치) 그리로 옮긴다.
+ * 악보 따라가기: 연주한 음을 악보 음과 맞춰 지금 위치를 짐작한다.
+ * - 확정된 음(onNote)으로 위치를 옮기고, 지금 울리는 음(live)으로 바로 다음 음만 미리 보여 준다.
+ * - 음정이 조금 틀려도(±TOL 반음) 다음 음으로 인정. 한 음 건너뛰기는 바로, 두 음 넘게 건너뛰면
+ *   그다음 음까지 맞아야 옮김 (틀린 음이 우연히 몇 음 뒤와 같아서 튀지 않게).
+ * - 다른 곳에서 다시 시작하면 최근 4음이 그대로 맞을 때만 옮기고, 멀리(24음 넘게)는 5음이 맞아야.
  */
+export const TOL = 0.6;
+const FAR = 24;
+
 export class ScoreFollower {
   /** 마지막으로 맞춘 악보 음 순번 (-1 = 아직 시작 전) */
   pos = -1;
   private recent: number[] = [];
   private misses = 0;
+  /** 두 음 넘게 건너뛴 후보 (다음 음으로 확인되면 옮김) */
+  private pending: number | null = null;
   private liveMidi: number | null = null;
   private liveCount = 0;
+  private shown = -1;
 
   constructor(private midis: number[], private look = 6) {}
 
   /** 지금 보여 줄 음 순번 */
   get current(): number { return this.shown; }
-  private shown = -1;
 
-  /** 끝난 음 하나. 바뀐 위치를 돌려줌 */
+  private near(j: number, m: number, tol = TOL): boolean { return j >= 0 && j < this.midis.length && Math.abs(this.midis[j] - m) <= tol; }
+
+  /** 끝난 음 하나 (반음 단위, 소수 가능 — 예: 64.3). 바뀐 위치를 돌려줌 */
   onNote(midi: number): number {
-    this.recent.push(midi);
-    if (this.recent.length > 4) this.recent.shift();
-    const j = this.find(midi, this.pos + 1);
-    if (j >= 0) {
-      this.pos = j; this.misses = 0;
-    } else {
-      this.misses++;
-      // 틀린 음이지만 바로 다음 음 근처(±2반음)면 그 음을 친 것으로
-      const nx = this.pos + 1;
-      if (this.misses === 1 && nx < this.midis.length && Math.abs(this.midis[nx] - midi) <= 2) this.pos = nx;
-      else if (this.misses >= 2) this.relocate();
-    }
-    this.shown = this.pos;
+    const r = Math.round(midi);
+    this.recent.push(r);
+    if (this.recent.length > 5) this.recent.shift();
     this.liveMidi = null; this.liveCount = 0;
+    // 몇 음째 안 맞으면 다른 곳에서 치는지 먼저 확인
+    if (this.misses >= 2 && this.relocate()) return this.shown;
+    const nx = this.pos + 1;
+    if (this.near(nx, midi)) return this.accept(nx);
+    // 건너뛴 후보가 이 음으로 확인되면
+    if (this.pending !== null && this.near(this.pending + 1, midi)) return this.accept(this.pending + 1);
+    // 방금 맞춘 음을 다시(활 바꿈 등) — 틀린 것 아님
+    if (this.pos >= 0 && this.near(this.pos, midi)) return this.shown;
+    const j = this.find(r, nx + 1);
+    if (j === nx + 1) return this.accept(j); // 한 음 건너뜀
+    this.misses++;
+    if (j >= 0) { this.pending = j; return this.shown; }
+    this.pending = null;
+    // 틀린 음이지만 바로 다음 음 근처(±2반음)면 그 음을 친 것으로
+    if (this.misses === 1 && this.near(nx, midi, 2)) { this.pos = nx; this.shown = nx; return this.shown; }
     return this.shown;
   }
 
-  /** 지금 울리는 음 (한 프레임마다, 무음이면 null). 보여 줄 위치를 돌려줌 */
+  private accept(j: number): number {
+    this.pos = j; this.shown = j; this.misses = 0; this.pending = null;
+    return j;
+  }
+
+  /** 지금 울리는 음 (한 프레임마다, 무음이면 null, 소수 가능). 보여 줄 위치를 돌려줌 — 바로 다음 음만 미리 */
   onLive(midi: number | null): number {
-    if (midi === this.liveMidi) this.liveCount++; else { this.liveMidi = midi; this.liveCount = 1; }
-    if (midi === null || this.liveCount < 3) return this.shown;
-    // 지금 울리는 음이 방금 맞춘 음과 같으면 그대로
-    if (this.pos >= 0 && this.midis[this.pos] === midi && this.shown === this.pos) return this.shown;
-    const j = this.find(midi, this.pos + 1, 3);
-    if (j >= 0) this.shown = j;
+    const r = midi === null ? null : Math.round(midi);
+    if (r === this.liveMidi) this.liveCount++; else { this.liveMidi = r; this.liveCount = 1; }
+    if (midi === null || this.liveCount < 5) return this.shown;
+    if (this.shown === this.pos && this.near(this.pos + 1, midi)) this.shown = this.pos + 1;
     return this.shown;
   }
 
   /** 처음으로 */
-  reset(): void { this.pos = -1; this.shown = -1; this.recent = []; this.misses = 0; this.liveMidi = null; this.liveCount = 0; }
+  reset(): void { this.pos = -1; this.shown = -1; this.recent = []; this.misses = 0; this.pending = null; this.liveMidi = null; this.liveCount = 0; }
 
   private find(midi: number, from: number, look = this.look): number {
     for (let j = Math.max(0, from); j < Math.min(this.midis.length, from + look); j++) if (this.midis[j] === midi) return j;
     return -1;
   }
 
-  /** 최근 3~4음이 악보 다른 곳과 그대로 맞으면 그리로 (가까운 곳 먼저) */
-  private relocate(): void {
-    for (const len of [4, 3]) {
-      if (this.recent.length < len) continue;
-      const seq = this.recent.slice(-len);
-      let best = -1, bestD = Infinity;
+  /** 최근 4음(멀면 5음)이 악보 다른 곳과 그대로 맞으면 그리로 (가까운 곳 먼저) */
+  private relocate(): boolean {
+    const at = (len: number): number[] => {
+      if (this.recent.length < len) return [];
+      const seq = this.recent.slice(-len), out: number[] = [];
       for (let s = 0; s + len <= this.midis.length; s++) {
         let ok = true;
         for (let k = 0; k < len; k++) if (this.midis[s + k] !== seq[k]) { ok = false; break; }
-        if (!ok) continue;
-        const end = s + len - 1, d = Math.abs(end - this.pos);
-        if (d < bestD) { bestD = d; best = end; }
+        if (ok) out.push(s + len - 1);
       }
-      if (best >= 0) { this.pos = best; this.misses = 0; return; }
+      return out;
+    };
+    const nearest = (c: number[]) => c.reduce((b, e) => (Math.abs(e - this.pos) < Math.abs(b - this.pos) ? e : b), c[0]);
+    const c4 = at(4);
+    if (!c4.length) return false;
+    let best = nearest(c4);
+    if (Math.abs(best - this.pos) > FAR) {
+      const c5 = at(5);
+      if (!c5.length) return false;
+      best = nearest(c5);
     }
+    this.accept(best);
+    return true;
   }
 }
 

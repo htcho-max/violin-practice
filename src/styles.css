@@ -621,3 +621,7 @@ button.mini.on { border-color: var(--accent); color: var(--accent); font-weight:
 }
 .ok-text { color: #15803d; }
 .segmented .seg-label { align-self: center; padding: 0 0.5em; font-size: 0.85em; opacity: 0.75; }
+/* 박에 맞춰 칠 때 내가 치고 있는 위치 (주황 테두리) */
+.score-sheet .me-note path, .score-sheet .me-note ellipse { stroke: #f59e0b !important; stroke-width: 3px !important; }
+.score-sheet .me-note:not(.now-note) path, .score-sheet .me-note:not(.now-note) ellipse { fill: #f59e0b !important; }
+.wait-msg { margin: 6px 0; padding: 6px 10px; border-radius: 8px; background: #fef3c7; color: #92400e; font-weight: 600; }
