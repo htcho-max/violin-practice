@@ -12,28 +12,28 @@
 
 ## 처음 한 번 설치 (PC, PowerShell)
 
-PC에 Node.js가 있어야 해요. `node -v`를 쳤을 때 안 나오면 https://nodejs.org 에서 LTS 버전을 설치하세요.
+PC에 Node.js가 있어야 해요. PowerShell에서는 `npm`·`npx` 대신 `npm.cmd`·`npx.cmd`로 쳐야 해요. 그냥 `npm`으로 치면 "스크립트를 실행할 수 없으므로" 하는 실행 정책 오류가 나요. `node -v`를 쳤을 때 안 나오면 https://nodejs.org 에서 LTS 버전을 설치하세요.
 
 1. **Cloudflare 무료 가입:** https://dash.cloudflare.com/sign-up
 
 2. **이 폴더에서 준비하고 로그인:**
    ```powershell
    cd "개발 프로젝트\violin\violin-practice\cloud"
-   npm install
-   npx wrangler login
+   npm.cmd install
+   npx.cmd wrangler login
    ```
    브라우저가 열리면 "Allow"를 누르세요.
 
 3. **데이터베이스 만들기:**
    ```powershell
-   npx wrangler d1 create violin-sync
+   npx.cmd wrangler d1 create violin-sync
    ```
    - 출력된 `database_id = "…"` 값을 `wrangler.toml`의 `database_id` 자리에 붙여 넣으세요.
    - "add it on your behalf?" 하고 물으면 **n**을 누르세요. 이미 적어 둔 칸이 있어서 직접 붙여 넣는 편이 안전해요.
 
 4. **서버 올리기:**
    ```powershell
-   npx wrangler deploy
+   npx.cmd wrangler deploy
    ```
    - 처음이면 workers.dev 하위 주소 이름을 정하라고 물어요. 아무 이름이나 정하면 돼요.
    - 끝나면 `https://violin-sync.<이름>.workers.dev` 주소가 나와요. 이 주소를 적어 두세요.
@@ -41,7 +41,7 @@ PC에 Node.js가 있어야 해요. `node -v`를 쳤을 때 안 나오면 https:/
 5. **동기화 열쇠 만들어 넣기:**
    ```powershell
    node new-key.mjs
-   npx wrangler secret put SYNC_KEY
+   npx.cmd wrangler secret put SYNC_KEY
    ```
    첫 줄이 출력한 32글자를 복사해 두고, 두 번째 명령이 물으면 붙여 넣으세요.
 
@@ -79,18 +79,18 @@ PC에 Node.js가 있어야 해요. `node -v`를 쳤을 때 안 나오면 https:/
 ## 관리
 
 - **사용량 보기:** Cloudflare 대시보드 → Workers & Pages / D1에서 봐요.
-- **열쇠 바꾸기:** `npx wrangler secret put SYNC_KEY`로 새 열쇠를 넣으세요. 그다음 각 기기에서 동기화를 끄고, 새 열쇠로 다시 켜면 돼요.
+- **열쇠 바꾸기:** `npx.cmd wrangler secret put SYNC_KEY`로 새 열쇠를 넣으세요. 그다음 각 기기에서 동기화를 끄고, 새 열쇠로 다시 켜면 돼요.
 - **서버를 처음부터 다시:**
   ```powershell
-  npx wrangler d1 execute violin-sync --remote --command "DELETE FROM rec; DELETE FROM blob;"
+  npx.cmd wrangler d1 execute violin-sync --remote --command "DELETE FROM rec; DELETE FROM blob;"
   ```
   - 기기에 있는 기록은 지워지지 않아요.
   - 각 기기에서 동기화를 끄고 다시 켜면 다시 올라가요.
-- **서버 코드를 고쳤을 때:** `npx wrangler deploy`만 다시 하면 돼요.
+- **서버 코드를 고쳤을 때:** `npx.cmd wrangler deploy`만 다시 하면 돼요.
 
 ## 개발
 
 - `src/index.ts`: 서버 전체 (API 설명은 맨 위에 있어요)
-- **로컬에서 돌려 보기:** `.dev.vars`에 `SYNC_KEY="아무거나16글자이상"`을 넣고 `npx wrangler dev`를 실행해요.
+- **로컬에서 돌려 보기:** `.dev.vars`에 `SYNC_KEY="아무거나16글자이상"`을 넣고 `npx.cmd wrangler dev`를 실행해요.
 - **테스트:** 앱 쪽 `tests/syncServer.test.ts`(서버)와 `tests/sync.test.ts`(두 기기)에 있어요.
 - **끝에서 끝까지 확인:** `tests/local/sync-e2e.mjs`는 진짜 Worker(로컬)와 빌드한 앱 두 개로 확인해요.
