@@ -72,7 +72,8 @@ export async function handle(req: Request, env: Env): Promise<Response> {
   const h = cors(req, env);
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...h, 'Content-Type': 'application/json; charset=utf-8' } });
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: h });
-  if (!env.SYNC_KEY || env.SYNC_KEY.length < 16) return json({ error: '서버에 동기화 열쇠(SYNC_KEY)가 없어요.' }, 500);
+  if (!env.SYNC_KEY) return json({ error: '서버에 동기화 열쇠(SYNC_KEY)가 없어요.' }, 500);
+  if (env.SYNC_KEY.length < 16) return json({ error: `서버의 동기화 열쇠가 너무 짧아요 (${env.SYNC_KEY.length}글자, 16글자 이상 필요). wrangler secret put SYNC_KEY 로 다시 넣어 주세요.` }, 500);
   const auth = req.headers.get('Authorization') ?? '';
   if (!same(auth, `Bearer ${env.SYNC_KEY}`)) return json({ error: '동기화 열쇠가 맞지 않아요.' }, 401);
   await ensureSchema(env);
