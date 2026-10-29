@@ -28,6 +28,8 @@
 
 데이터는 이 기기 브라우저(IndexedDB)에만 저장됩니다.
 
+**기기 동기화 (v0.24)**: 내 Cloudflare 계정에 작은 서버(Worker + D1, 무료)를 두면 탭과 휴대폰의 기록·악보·내 표시·세브치크가 서로 맞춰집니다 (녹음 제외). 설치 방법: [`cloud/README.md`](cloud/README.md). 앱: 설정 → 기기 동기화.
+
 ## 실행 (Windows)
 ```
 npm.cmd install

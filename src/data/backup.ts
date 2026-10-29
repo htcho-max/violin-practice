@@ -1,4 +1,6 @@
 import { db } from './db';
+import { markRemote, syncOn, SYNC_TABLES } from '../sync/track';
+import { afterRestore, globalizeIds } from '../sync/engine';
 
 /** 백업 파일 형식 (버전 2: 모든 표) */
 export interface Backup {
@@ -68,17 +70,24 @@ export async function restoreBackup(text: string): Promise<{ counts: Record<stri
   const recs = data.withRecordings && Array.isArray(t.recordings)
     ? await Promise.all((t.recordings as { blob: string }[]).map(async (r) => ({ ...r, blob: await dataURLToBlob(r.blob) })))
     : null;
-  await db.transaction('rw', [db.sessions, db.pieces, db.kv, db.ladders, db.scores, db.scoreRuns, db.lessonNotes, db.reviews, db.echoRuns, db.recordings], async () => {
+  const syncing = syncOn();
+  const now = Date.now();
+  await db.transaction('rw', [db.sessions, db.pieces, db.kv, db.ladders, db.scores, db.scoreRuns, db.lessonNotes, db.reviews, db.echoRuns, db.recordings], async (tx) => {
+    // 동기화 중이면: 지운 것을 다른 기기에 알리지 않고(묘비 없음), 되돌린 줄은 지금 시각으로 → 서버로 보내짐
+    if (syncing) markRemote(tx);
     for (const name of TABLES) {
       // 복습함이 없던 예전 백업: 악보를 되돌리면 복습함은 비움 (없는 악보의 마디가 남지 않게)
       const rows = name === 'recordings' ? recs : name === 'reviews' && !t.reviews && t.scores ? [] : (t[name] as unknown[] | undefined);
       if (!rows) continue;
       const table = (db as unknown as Record<string, { clear: () => Promise<void>; bulkPut: (r: unknown[]) => Promise<unknown> }>)[name];
       await table.clear();
-      if (rows.length) await table.bulkPut(rows);
+      const put = syncing && (SYNC_TABLES as readonly string[]).includes(name) ? rows.map((r) => ({ ...(r as object), _u: now })) : rows;
+      if (put.length) await table.bulkPut(put);
       counts[name] = rows.length;
     }
   });
+  // 동기화 중이면: 옛 백업의 작은 id 를 다른 기기와 겹치지 않게 (되돌린 기록은 다음 동기화에서 서버로)
+  if (syncing) { await globalizeIds(); afterRestore(); }
   return { counts };
 }
 

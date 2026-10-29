@@ -5,6 +5,7 @@ import { saveBackup, restoreBackup, storageInfo } from '../data/backup';
 import { checkForUpdate } from '../state/appUpdate';
 import { NumField } from './NumField';
 import { RecCleanup } from './RecCleanup';
+import { SyncCard } from './SyncCard';
 import { FullscreenButton } from './FullscreenButton';
 import { fsSupported, isStandalone, appFullscreen, fullscreenPref, setFullscreenPref, enterFullscreen } from '../state/fullscreen';
 import { TOLERANCES, tolFor, type ToleranceId } from '../score/tolerance';
@@ -90,6 +91,9 @@ export function SettingsSheet({ onClose }: { onClose: () => void }) {
           </div>
         ))}
         <button className="secondary" onClick={() => update({ routine: DEFAULT_ROUTINE })}>기본 루틴으로 되돌리기</button>
+
+        <h3>기기 동기화</h3>
+        <SyncCard />
 
         <h3>데이터</h3>
         <p className="muted small">연습 기록·악보·녹음은 이 기기의 브라우저 안에만 저장돼요. 기기를 바꾸거나 브라우저 데이터를 지우기 전에 백업해 두세요.{info ? ` 지금 ${info.usedMB < 1 ? '1MB 미만' : `${Math.round(info.usedMB)}MB`} 사용 중.` : ''}{info?.persisted === false ? ' 브라우저가 공간이 부족할 때 지울 수 있는 상태예요. 홈 화면에 앱으로 설치하면 더 안전해요.' : ''}</p>

@@ -1,0 +1,15 @@
+# 바이올린 연습 도우미 동기화 서버 (설치 방법은 README.md)
+name = "violin-sync"
+main = "src/index.ts"
+compatibility_date = "2025-09-01"
+workers_dev = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "violin-sync"
+# `npx wrangler d1 create violin-sync` 가 알려 주는 database_id 로 바꾸세요
+database_id = "00000000-0000-0000-0000-000000000000"
+
+[vars]
+# 앱 주소 (쉼표로 여러 개). localhost 는 늘 허용
+ALLOWED_ORIGINS = "https://htcho-max.github.io"

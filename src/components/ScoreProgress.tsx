@@ -19,7 +19,7 @@ function RecAudio({ id }: { id: number }) {
     db.recordings.get(id).then((r) => { if (r && alive) { u = URL.createObjectURL(r.blob); setUrl(u); } }).catch(() => {});
     return () => { alive = false; if (u) URL.revokeObjectURL(u); };
   }, [id]);
-  return url ? <audio controls src={url} preload="metadata" className="player" /> : <p className="muted small">녹음이 지워졌어요.</p>;
+  return url ? <audio controls src={url} preload="metadata" className="player" /> : <p className="muted small">녹음이 이 기기에 없어요 (지웠거나 다른 기기에서 녹음).</p>;
 }
 
 /** 처음 녹음과 최근 녹음 고르기: 최근 녹음과 구간이 겹치는 가장 오래된 녹음 */

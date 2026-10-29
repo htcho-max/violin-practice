@@ -635,3 +635,9 @@ button.mini.on { border-color: var(--accent); color: var(--accent); font-weight:
 .sev-cell.on { outline: 2px solid #2563eb; font-weight: 700; }
 .sev-preview { overflow-x: auto; background: #fff; border-radius: 8px; margin: 6px 0; min-height: 60px; }
 .sev-bar { display: flex; justify-content: space-between; gap: 6px; margin: 4px 0; }
+
+/* 기기 동기화 (설정) */
+.sync-card { display: flex; flex-direction: column; gap: 6px; }
+.sync-card label { display: flex; flex-direction: column; gap: 2px; }
+.sync-card input { width: 100%; box-sizing: border-box; font-size: 15px; padding: 6px 8px; }
+.sync-keytext { word-break: break-all; user-select: all; }

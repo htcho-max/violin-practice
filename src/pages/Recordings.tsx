@@ -41,7 +41,7 @@ export function RecPlayerById({ id }: { id: number }) {
   const [rec, setRec] = useState<Recording | null | undefined>(undefined);
   useEffect(() => { db.recordings.get(id).then((r) => setRec(r ?? null)); }, [id]);
   if (rec === undefined) return null;
-  if (rec === null) return <p className="muted small">녹음이 지워졌어요.</p>;
+  if (rec === null) return <p className="muted small">녹음이 이 기기에 없어요 (지웠거나 다른 기기에서 녹음).</p>;
   return <><div className="muted small">{stat(rec)}</div><Player rec={rec} /></>;
 }
 

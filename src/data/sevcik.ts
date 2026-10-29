@@ -5,6 +5,7 @@
  * 변형을 열면 그 변형 악보를 보통 악보(ScoreFile, sevcik 표시)로 만들어 두고 다시 씀 → 채점·기록·내 표시가 그대로.
  */
 import { db, type ScoreFile, type SevcikPack } from './db';
+import { markRemote } from '../sync/track';
 
 export const PACK_KIND = 'violin-sevcik-pack';
 export interface PackFile {
@@ -33,14 +34,18 @@ export function parsePack(text: string): PackFile {
 }
 
 /** 팩 넣기 (같은 id 면 바꿈 — 이미 만든 변형 악보도 새 악보로) */
-export async function importPack(file: Blob): Promise<SevcikPack> {
+export async function importPack(file: Blob, opts: { remote?: boolean; packH?: string; u?: number } = {}): Promise<SevcikPack> {
   const p = parsePack(await readPackText(file));
   const meta: SevcikPack = {
     id: p.id, title: p.title, subtitle: p.subtitle, note: p.note, createdAt: Date.now(), order: p.order, fixedPos: p.fixedPos ?? null, altPos: p.altPos ?? null,
     variants: p.variants.map((v) => ({ n: v.n, label: v.label ?? '', k: v.k ?? 1, bpm: v.bpm ?? null })).sort((a, b) => a.n - b.n),
   };
+  // 다른 기기에서 받아 넣는 경우: 팩 해시와 바꾼 시각을 그대로 (다시 보내지 않게)
+  if (opts.packH) (meta as SevcikPack & { packH?: string }).packH = opts.packH;
+  if (opts.u !== undefined) (meta as SevcikPack & { _u?: number })._u = opts.u;
   const map = await scoreMap(p.id);
-  await db.transaction('rw', db.sevcikPacks, db.sevcikXml, db.scores, async () => {
+  await db.transaction('rw', db.sevcikPacks, db.sevcikXml, db.scores, async (tx) => {
+    if (opts.remote) markRemote(tx);
     await db.sevcikXml.where('id').startsWith(`${p.id}:`).delete();
     await db.sevcikXml.bulkPut([{ id: `${p.id}:0`, xml: p.theme }, ...p.variants.map((v) => ({ id: `${p.id}:${v.n}`, xml: v.xml }))]);
     await db.sevcikPacks.put(meta);
@@ -54,8 +59,22 @@ export async function importPack(file: Blob): Promise<SevcikPack> {
 }
 
 export const listPacks = () => db.sevcikPacks.toArray();
-export async function deletePack(id: string) {
-  await db.transaction('rw', db.sevcikPacks, db.sevcikXml, async () => {
+
+/** 기기에 저장된 팩을 다시 팩 파일 글자로 (동기화: 다른 기기로 보낼 때). 늘 같은 글자가 나옴 */
+export async function packTextFromDb(id: string): Promise<string | null> {
+  const p = await db.sevcikPacks.get(id);
+  if (!p) return null;
+  const rows = await db.sevcikXml.where('id').startsWith(`${id}:`).toArray();
+  const xml = new Map(rows.map((r) => [Number(r.id.slice(id.length + 1)), r.xml]));
+  const theme = xml.get(0);
+  if (theme === undefined) return null;
+  const variants = [...p.variants].sort((a, b) => a.n - b.n).map((v) => ({ n: v.n, label: v.label, k: v.k, bpm: v.bpm ?? null, xml: xml.get(v.n) ?? '' }));
+  const pack: PackFile = { kind: PACK_KIND, version: 2, id: p.id, title: p.title, subtitle: p.subtitle, note: p.note, order: p.order, fixedPos: p.fixedPos ?? null, altPos: p.altPos ?? null, theme, variants };
+  return JSON.stringify(pack);
+}
+export async function deletePack(id: string, opts: { remote?: boolean } = {}) {
+  await db.transaction('rw', db.sevcikPacks, db.sevcikXml, async (tx) => {
+    if (opts.remote) markRemote(tx);
     await db.sevcikPacks.delete(id);
     await db.sevcikXml.where('id').startsWith(`${id}:`).delete();
   });

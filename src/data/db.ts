@@ -1,4 +1,5 @@
 import Dexie, { type Table } from 'dexie';
+import { installTracking, type Tomb } from '../sync/track';
 
 export interface SessionItem { key: string; label: string; sec: number; pieceId?: string }
 export interface Session {
@@ -191,6 +192,8 @@ class PracticeDB extends Dexie {
   echoRuns!: Table<EchoRun, number>;
   sevcikPacks!: Table<SevcikPack, string>;
   sevcikXml!: Table<SevcikXml, string>;
+  /** 동기화: 지운 줄 (서버에 알릴 것) */
+  tomb!: Table<Tomb, string>;
   constructor() {
     super('violin-practice');
     this.version(1).stores({
@@ -216,6 +219,13 @@ class PracticeDB extends Dexie {
     this.version(9).stores({ echoRuns: '++id, date, createdAt' });
     // 세브치크 팩 (원형 + 변형)
     this.version(10).stores({ sevcikPacks: 'id', sevcikXml: 'id' });
+    // 기기 간 동기화: 줄마다 바꾼 시각 _u (인덱스) + 지운 줄 묘비
+    this.version(11).stores({
+      sessions: '++id, date, startedAt, _u', pieces: 'id, book, status, _u', kv: 'key, _u', ladders: '++id, date, pieceId, _u',
+      scores: '++id, createdAt, pieceId, exercise.stepId, listKey, _u', scoreRuns: '++id, date, scoreId, createdAt, _u',
+      lessonNotes: '++id, date, scoreId, createdAt, _u', reviews: 'id, due, scoreId, _u', echoRuns: '++id, date, createdAt, _u',
+      sevcikPacks: 'id, _u', tomb: 'k',
+    });
     // 악보를 넣거나 고칠 때 listKey 를 늘 맞춰 둠 (가져오기·백업 되돌리기·폴더 옮기기 모두)
     this.scores.hook('creating', (_pk, obj) => { obj.listKey = scoreListKey(obj); });
     this.scores.hook('updating', (mods, _pk, obj) => {
@@ -226,6 +236,7 @@ class PracticeDB extends Dexie {
       if ('exercise' in m && m.exercise === undefined) delete next.exercise;
       return { listKey: scoreListKey(next) };
     });
+    installTracking(this);
   }
 }
 

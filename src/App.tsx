@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { TabBar, type TabId } from './components/TabBar';
 import { StatusBar } from './components/StatusBar';
 import { SettingsSheet } from './components/SettingsSheet';
+import { hasSyncPrefill } from './components/SyncCard';
 import { FullscreenButton } from './components/FullscreenButton';
 import { Today } from './pages/Today';
 import { Tuner } from './pages/Tuner';
@@ -23,7 +24,8 @@ export function App({ updatedFrom = null }: { updatedFrom?: string | null }) {
   const [tab, setTab] = useState<TabId>(() => {
     try { return (localStorage.getItem('violin-tab') as TabId) || 'today'; } catch { return 'today'; }
   });
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  // 동기화 연결 링크로 열었으면 설정을 바로 (동기화 칸이 채워져 있음)
+  const [settingsOpen, setSettingsOpen] = useState(() => hasSyncPrefill());
   const { ready } = useSettings();
   useAutoFullscreen();
   const go = (t: TabId) => { setTab(t); try { localStorage.setItem('violin-tab', t); } catch { /* 무시 */ } };
