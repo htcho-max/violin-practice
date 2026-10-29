@@ -8,7 +8,7 @@ workers_dev = true
 binding = "DB"
 database_name = "violin-sync"
 # `npx wrangler d1 create violin-sync` 가 알려 주는 database_id 로 바꾸세요
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "11c55ff5-b47f-4b41-8f0c-8b5c3c9c3b64"
 
 [vars]
 # 앱 주소 (쉼표로 여러 개). localhost 는 늘 허용
