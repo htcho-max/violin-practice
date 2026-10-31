@@ -641,3 +641,8 @@ button.mini.on { border-color: var(--accent); color: var(--accent); font-weight:
 .sync-card label { display: flex; flex-direction: column; gap: 2px; }
 .sync-card input { width: 100%; box-sizing: border-box; font-size: 15px; padding: 6px 8px; }
 .sync-keytext { word-break: break-all; user-select: all; }
+
+/* 레슨 노트 말로 입력 */
+.lesson-mic { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 4px 0; }
+.lesson-mic .mic.on { background: #dc2626; color: #fff; border-color: #dc2626; }
+.lesson-add select { font: inherit; padding: 6px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--text); max-width: 60vw; }
