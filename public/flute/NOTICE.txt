@@ -1,0 +1,5 @@
+플루트 샘플 출처: VSCO 2 Community Edition (Versilian Studios), Woodwinds/Flute/susvib — CC0 1.0 (퍼블릭 도메인)
+https://github.com/sgossner/VSCO-2-CE
+클라리넷·플룻 연습 앱(htcho-max/clarinet-practice)에서 쓰던 것과 같은 파일입니다: 모노로 바꾸고, 앞 무음을 자르고, 4초로 줄이고,
+지속음 크기를 -18 dBFS 로 맞춘 뒤 64kbps MP3 로 다시 인코딩했습니다. 파일 이름: vib-<실음 midi>.mp3 (비브라토).
+음정 보정값·어택 길이는 src/audio/fluteSamples.json 에 있습니다.

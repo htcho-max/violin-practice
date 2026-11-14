@@ -1640,7 +1640,7 @@ function ScoreView({ score, onClose, initial, notice, onOpenOther }: {
         )}
         <input ref={accFile} type="file" accept=".musicxml,.xml" hidden onChange={(e) => e.target.files?.[0] && attachAcc(e.target.files[0])} data-testid="acc-file" />
         {accError && <p className="error">{accError}</p>}
-        <p className="hint">{hasAcc ? `반주 ${accParts.length}파트 · 피아노 파트는 피아노 소리, 그 밖은 바이올린 소리로 들려줘요.` : '바흐 더블의 2바이올린 파트나 피아노 반주를 붙이면 같이 들으며 연습할 수 있어요. 마디 번호가 같은 악보여야 해요.'}</p>
+        <p className="hint">{hasAcc ? `반주 ${accParts.length}파트 · 피아노 파트는 피아노, 플루트 파트는 플루트, 그 밖은 바이올린 소리로 들려줘요.` : '바흐 더블의 2바이올린 파트나 피아노 반주를 붙이면 같이 들으며 연습할 수 있어요. 마디 번호가 같은 악보여야 해요.'}</p>
       </div>
 
       </div>

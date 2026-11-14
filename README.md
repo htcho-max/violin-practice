@@ -30,6 +30,8 @@
 
 **기기 동기화 (v0.24)**: 내 Cloudflare 계정에 작은 서버(Worker + D1, 무료)를 두면 탭과 휴대폰의 기록·악보·내 표시·세브치크가 서로 맞춰집니다 (녹음 제외). 설치 방법: [`cloud/README.md`](cloud/README.md). 앱: 설정 → 기기 동기화.
 
+**플루트 반주 소리 (v0.26)**: 반주·합주 파트 이름이 플루트(Flute·Fl.·플룻)이면 실제 플루트 녹음(VSCO 2 CE, CC0 — `public/flute/NOTICE.txt`, 클라리넷·플룻 앱과 같은 소리)으로 들려줘요. 피아노 파트는 피아노, 그 밖은 바이올린.
+
 ## 실행 (Windows)
 ```
 npm.cmd install

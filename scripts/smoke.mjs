@@ -1154,6 +1154,31 @@ try {
     ok(errors.length === 0, `콘솔 오류 없음 ${errors.join(' | ')}`);
     await browser.close();
   }
+  // ── 플루트 파트는 플루트 녹음으로 (v0.26) ──
+  {
+    const { browser, page, errors } = await launch('a445.wav');
+    const reqs = [];
+    page.on('request', (r) => { if (/\/flute\/vib-\d+\.mp3$/.test(r.url())) reqs.push(r.url()); });
+    const attrs = '<attributes><divisions>1</divisions><key><fifths>0</fifths></key><time><beats>4</beats><beat-type>4</beat-type></time><clef><sign>G</sign><line>2</line></clef></attributes>';
+    const ms = (o) => [1, 2].map((m) => `<measure number="${m}">${m === 1 ? attrs : ''}${['C', 'E', 'G', 'C'].map((st, k) => `<note><pitch><step>${st}</step><octave>${o + (k === 3 ? 1 : 0)}</octave></pitch><duration>1</duration><type>quarter</type></note>`).join('')}</measure>`).join('');
+    const xml = `<?xml version="1.0" encoding="UTF-8"?><score-partwise version="4.0"><work><work-title>Flute duo smoke</work-title></work><part-list><score-part id="P1"><part-name>플루트</part-name></score-part><score-part id="P2"><part-name>바이올린</part-name></score-part></part-list><part id="P1">${ms(5)}</part><part id="P2">${ms(4)}</part></score-partwise>`;
+    fs.writeFileSync('/tmp/flute-duo.musicxml', xml);
+    await tab(page, '악보');
+    await page.getByTestId('score-file').setInputFiles('/tmp/flute-duo.musicxml');
+    await page.waitForTimeout(1500);
+    await page.getByTestId('my-part').selectOption('1');
+    await page.waitForTimeout(800);
+    const hint = await page.locator('.hint', { hasText: '반주 1파트' }).first().textContent().catch(() => '');
+    ok(/플루트 파트는 플루트/.test(hint ?? ''), `반주 안내에 플루트 (${hint})`);
+    await page.getByTestId('play-bpm').fill('200');
+    await page.getByTestId('play-toggle').click();
+    await page.waitForTimeout(2500);
+    const lit = await page.locator('[data-testid=osmd] .now-note').count();
+    ok(lit > 0 && reqs.length === 10, `플루트 파트를 플루트 샘플로 재생 (불러온 샘플 ${reqs.length}, 음 ${lit})`);
+    await page.getByTestId('play-toggle').click().catch(() => {});
+    ok(errors.length === 0, `콘솔 오류 없음 ${errors.join(' | ')}`);
+    await browser.close();
+  }
   // ── 박에 맞춰 칠 때 늦어지면: 내 위치 표시 / 기다려 주기 (a445: A4 만 계속 → 첫 음 뒤로 못 따라감) ──
   {
     const { browser, page, errors } = await launch('a445.wav');

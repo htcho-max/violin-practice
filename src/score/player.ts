@@ -3,6 +3,7 @@ import { stringWave } from '../audio/timbre';
 import { midiToFreq } from '../audio/notes';
 import type { ParsedScore, ScoreNote } from './parse';
 import { loadSampleSet, scheduleViolinNote, type SampleSet } from '../audio/violinSampler';
+import { loadFluteSamples, scheduleFluteNote, isFluteName } from '../audio/fluteSampler';
 import { getRoom, roomBus, type Room } from '../audio/room';
 import { noteClick, clearClicks } from '../audio/clicks';
 import { outputLatency } from '../audio/latency';
@@ -16,12 +17,14 @@ export function getVoice(): Voice {
 }
 export function saveVoice(v: Voice) { try { localStorage.setItem(VOICE_KEY, v); } catch { /* 무시 */ } }
 
-export interface PlayEvent { note: ScoreNote; time: number; dur: number; inst?: 'violin' | 'piano' } // 초
+/** 반주 파트 소리 */
+export type AccInst = 'violin' | 'piano' | 'flute';
+export interface PlayEvent { note: ScoreNote; time: number; dur: number; inst?: AccInst } // 초
 /** 반주 파트 (parse 를 allNotes 로 읽은 것) */
-export interface AccPart { score: ParsedScore; inst: 'violin' | 'piano' }
+export interface AccPart { score: ParsedScore; inst: AccInst }
 export type Plan = { events: PlayEvent[]; clicks: { time: number; accent: boolean }[]; total: number; acc: PlayEvent[] };
 /** 파트 이름으로 소리 고르기 */
-export const instFor = (name: string): 'violin' | 'piano' => (/piano|klavier|피아노|pf\.?$|keyboard|organ|harp|cembalo|harpsichord/i.test(name) ? 'piano' : 'violin');
+export const instFor = (name: string): AccInst => (/piano|klavier|피아노|pf\.?$|^pno\.?$|keyboard|organ|harp|cembalo|harpsichord/i.test(name) ? 'piano' : isFluteName(name) ? 'flute' : 'violin');
 export interface PlanOptions {
   bpm: number; from: number; to: number; countIn: boolean;
   /** 마디 순서 (도돌이표 펼치기, playOrder). 없으면 악보 순서대로 한 번씩. 구간(from~to) 밖 마디는 건너뜀 */
@@ -207,6 +210,8 @@ export class ScorePlayer {
     // 실제 바이올린 샘플 (못 불러오면 합성음으로). 합주는 솔로도 함께 (아주 높은 음·실패 대비)
     const voice = opts.voice ?? 'sample';
     const [soloOk, ensOk] = voice === 'synth' ? [false, false] : await Promise.all([loadSampleSet(ctx, 'solo'), voice === 'ensemble' ? loadSampleSet(ctx, 'ensemble') : Promise.resolve(false)]);
+    // 플루트 파트가 있으면 플루트 녹음도 (못 불러오면 바이올린 소리로)
+    const fluteOk = voice !== 'synth' && plan.acc.some((e) => e.inst === 'flute') ? await loadFluteSamples(ctx) : false;
     const useSample = soloOk;
     const set: SampleSet = ensOk ? 'ensemble' : 'solo';
     if (gen !== this.gen) return;
@@ -275,11 +280,23 @@ export class ScorePlayer {
       }
     };
 
+    /** 플루트 한 음 (꾸밈음·트릴 포함). 피치카토 표시는 무시 */
+    const fluteEvent = (e: PlayEvent, out: AudioNode, base: number) => {
+      const sh = noteShape(e);
+      for (const pc of expandOrnaments(e, sh.len)) {
+        const n = scheduleFluteNote(ctx, out, pc.midi, t0 + pc.time, pc.len, opts.a4, base * sh.gain, {
+          slurIn: pc.legato || sh.slurIn, accent: !!e.note.art?.accent, level: sh.gain, release: pc.legato ? 0.05 : sh.release * 0.6,
+        });
+        if (n) this.keep(...n);
+      }
+    };
+
     // 예약할 일: 시각(계획의 초)과 실제로 예약하는 함수. 2.5초 앞까지만 조금씩 예약해 긴 곡도 가볍게
     type Job = { at: number; run: () => void };
     const jobs: Job[] = [];
     for (const e of plan.acc) {
       jobs.push({ at: Math.max(0, e.time - GRACE * (e.note.art?.grace?.length ?? 0)), run: () => {
+        if (e.inst === 'flute' && fluteOk) { fluteEvent(e, accGain, 0.8); return; }
         if (e.inst === 'piano') { this.keep(...pianoNote(ctx, accGain, midiToFreq(e.note.midi, opts.a4), t0 + e.time, e.dur)); return; }
         if (!useSample) { this.keep(...pianoNote(ctx, accGain, midiToFreq(e.note.midi, opts.a4), t0 + e.time, e.dur)); return; }
         playEvent(e, accGain, accGain, 0.8);
